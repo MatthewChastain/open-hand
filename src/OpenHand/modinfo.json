@@ -1,0 +1,16 @@
+{
+  "type": "code",
+  "modid": "openhand",
+  "name": "Open Hand",
+  "description": "A virtual, always-empty hand selection between hotbar slot 0 and the offhand.",
+  "authors": ["Matthew Chastain"],
+  "version": "0.1.0",
+  "networkVersion": "1",
+  "side": "universal",
+  "requiredOnClient": true,
+  "requiredOnServer": true,
+  "dependencies": {
+    "game": "1.22.7"
+  },
+  "website": "https://github.com/MatthewChastain/open-hand"
+}

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>OpenHand.StateTests</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/OpenHand/Common/OpenHandSelectionState.cs" Link="OpenHandSelectionState.cs" />
+    <Compile Include="../../src/OpenHand/Common/OpenHandWheelRing.cs" Link="OpenHandWheelRing.cs" />
+  </ItemGroup>
+</Project>

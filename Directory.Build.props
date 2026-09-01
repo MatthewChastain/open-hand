@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <VintageStoryPath Condition="'$(VintageStoryPath)' == ''">$(VINTAGE_STORY)</VintageStoryPath>
+  </PropertyGroup>
+  <Import Project="Local.props" Condition="Exists('Local.props')" />
+  <Target Name="RequireVintageStoryPath" BeforeTargets="ResolveReferences" Condition="'$(VintageStoryPath)' == ''">
+    <Error Text="Set VintageStoryPath or VINTAGE_STORY to the Vintage Story installation directory." />
+  </Target>
+</Project>

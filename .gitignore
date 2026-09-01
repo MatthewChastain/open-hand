@@ -1,0 +1,8 @@
+.tools/
+.vs/
+.idea/
+bin/
+obj/
+artifacts/
+Local.props
+*.user
