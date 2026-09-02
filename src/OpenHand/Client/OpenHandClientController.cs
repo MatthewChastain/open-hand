@@ -1,4 +1,5 @@
 using OpenHand.Common;
+using OpenHand.Patches;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 
@@ -118,7 +119,16 @@ internal sealed class OpenHandClientController : IDisposable
             case OpenHandWheelRing.WheelAction.ExitToSlot:
                 args.SetHandled();
                 RequestSelection(false, decision.Destination, player);
+                int previousSlot = player.InventoryManager.ActiveHotbarSlotNumber;
                 player.InventoryManager.ActiveHotbarSlotNumber = decision.Destination;
+                // Same-value assignment raises no ActiveSlotChanged event, so
+                // restore the highlight the HUD patch removed while Open Hand
+                // was selected.
+                if (player.InventoryManager.ActiveHotbarSlotNumber == previousSlot)
+                {
+                    HudHotbarPatch.RestoreHighlight(capi, decision.Destination);
+                }
+
                 break;
         }
     }
