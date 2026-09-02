@@ -28,8 +28,13 @@ entries = []
 for path in required + [build / "OpenHand.pdb"]:
     if path.is_file():
         entries.append((path, path.name))
-# Ship binaries only: the game compiles any .cs files found in a mod at runtime
-# without Harmony or full BCL references, which breaks the mod.
+# Ship binaries plus game assets: the game compiles any .cs files found in a
+# mod at runtime without Harmony or full BCL references, which breaks the mod.
+assets_root = root / "assets"
+if assets_root.is_dir():
+    for path in sorted(assets_root.rglob("*")):
+        if path.is_file():
+            entries.append((path, path.relative_to(assets_root.parent)))
 
 archive.parent.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
