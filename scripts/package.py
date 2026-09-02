@@ -28,15 +28,8 @@ entries = []
 for path in required + [build / "OpenHand.pdb"]:
     if path.is_file():
         entries.append((path, path.name))
-source_root = root / "src" / "OpenHand"
-sources = [
-    path
-    for path in sorted(source_root.rglob("*.cs"))
-    # Skip build intermediates (obj/*.g.cs, AssemblyInfo.cs) and any copies under bin/.
-    if not {"bin", "obj"} & set(path.relative_to(source_root).parts)
-]
-for path in sources:
-    entries.append((path, pathlib.Path("src") / path.relative_to(source_root)))
+# Ship binaries only: the game compiles any .cs files found in a mod at runtime
+# without Harmony or full BCL references, which breaks the mod.
 
 archive.parent.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
