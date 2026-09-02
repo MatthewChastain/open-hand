@@ -25,8 +25,6 @@ internal sealed class OpenHandIndicatorRenderer : IRenderer
     private int iconTextureId;
     private bool iconLoadAttempted;
     private LoadedTexture? borderTexture;
-    private bool loggedBoundsFailure;
-    private bool loggedFirstDraw;
     private bool disposed;
 
     public OpenHandIndicatorRenderer(ICoreClientAPI capi)
@@ -57,15 +55,8 @@ internal sealed class OpenHandIndicatorRenderer : IRenderer
             }
         }
 
-        if (!TryGetSlotZeroBounds(out ElementBounds slotZero))
+        if (!TryGetHotbarGrid(out ElementBounds slotZero, out GuiElementItemSlotGridBase grid))
         {
-            if (!loggedBoundsFailure)
-            {
-                loggedBoundsFailure = true;
-                string names = string.Join(",", capi.Gui.LoadedGuis.Select(static d => d.DebugName));
-                capi.Logger.Warning("[openhand] hotbar bounds lookup failed; loaded dialogs: {0}", names);
-            }
-
             return;
         }
 
@@ -74,20 +65,23 @@ internal sealed class OpenHandIndicatorRenderer : IRenderer
         float x = (float)slotZero.renderX - size;
         float y = (float)slotZero.renderY;
 
-        // z 90: the vanilla item layer, proven visible above the hotbar background.
-        capi.Render.Render2DTexture(iconTextureId, x, y, size, size, 90f);
-        if (selected && borderTexture is not null)
-        {
-            capi.Render.Render2DTexturePremultipliedAlpha(
-                borderTexture.TextureId, x - 3f, y - 3f, size + 6f, size + 6f, 91f);
-        }
+        // Render the Open Hand icon at the gap position next to slot 0
+        capi.Render.Render2DTexture(iconTextureId, x, y, size, size, 50f);
 
-        if (!loggedFirstDraw)
+        // When selected, draw the vanilla active-slot highlight border on top
+        if (selected)
         {
-            loggedFirstDraw = true;
-            capi.Logger.Warning(
-                "[openhand] indicator drawn at {0},{1} size {2} icon {3} selected={4}",
-                x, y, size, iconTextureId, selected);
+            int highlightTexId = grid.highlightSlotTexture?.TextureId ?? borderTexture?.TextureId ?? 0;
+            if (highlightTexId != 0)
+            {
+                capi.Render.Render2DTexturePremultipliedAlpha(
+                    highlightTexId,
+                    (int)(x - 2f),
+                    (int)(y - 2f),
+                    (int)(size + 4f),
+                    (int)(size + 4f),
+                    50f);
+            }
         }
     }
 
@@ -119,10 +113,9 @@ internal sealed class OpenHandIndicatorRenderer : IRenderer
         };
     }
 
-    // Reads the vanilla hotbar grid's first slot bounds so the icon tracks the
-    // exact position, size, and GUI scale of hotbar slot 0. The vanilla slot
-    // highlight renders from these same screen-space coordinates.
-    private bool TryGetSlotZeroBounds(out ElementBounds slotZero)
+    // Reads the vanilla hotbar grid and slot 0 bounds so the indicator tracks
+    // the exact position, size, and GUI scale of the hotbar.
+    private bool TryGetHotbarGrid(out ElementBounds slotZero, out GuiElementItemSlotGridBase grid)
     {
         foreach (GuiDialog dialog in capi.Gui.LoadedGuis)
         {
@@ -131,11 +124,12 @@ internal sealed class OpenHandIndicatorRenderer : IRenderer
                 continue;
             }
 
-            if (SlotGridField?.GetValue(dialog) is GuiElementItemSlotGridBase grid &&
-                grid.SlotBounds is { Length: > 0 } bounds &&
+            if (SlotGridField?.GetValue(dialog) is GuiElementItemSlotGridBase slotGrid &&
+                slotGrid.SlotBounds is { Length: > 0 } bounds &&
                 bounds[0] is not null)
             {
                 slotZero = bounds[0];
+                grid = slotGrid;
                 return true;
             }
 
@@ -143,6 +137,7 @@ internal sealed class OpenHandIndicatorRenderer : IRenderer
         }
 
         slotZero = null!;
+        grid = null!;
         return false;
     }
 
