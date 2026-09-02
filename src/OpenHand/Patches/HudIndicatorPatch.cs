@@ -21,6 +21,9 @@ internal static class HudIndicatorPatch
     // at unscaled x 10 and the main slot grid at unscaled x 110.
     private const double HotbarGridUnscaledX = 110.0;
 
+    private static readonly FieldInfo? DialogBoundsField =
+        AccessTools.Field("Vintagestory.Client.NoObf.HudHotbar:dialogBounds");
+
     private static MethodBase? TargetMethod()
     {
         Type? type = AccessTools.TypeByName("Vintagestory.Client.NoObf.HudHotbar");
@@ -54,6 +57,17 @@ internal static class HudIndicatorPatch
             fixedHeight = slotSize
         };
 
+        // Parent into the same bounds frame the vanilla slot grids use
+        // (their 10/110 unscaled anchors); without this the standalone bounds
+        // resolve to the top-left of the screen.
+        if (DialogBoundsField?.GetValue(dialog) is not ElementBounds dialogBounds)
+        {
+            OpenHandModSystem.ClientApi?.Logger.Warning(
+                "[openhand] could not read HudHotbar.dialogBounds; indicator skipped");
+            return;
+        }
+
+        dialogBounds.WithChild(cellBounds);
         composer.AddDynamicCustomDraw(cellBounds, DrawPalmCell, ElementKey);
         composer.ReCompose();
         OpenHandModSystem.ClientApi?.Logger.Warning(
