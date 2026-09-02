@@ -197,6 +197,7 @@ internal sealed class OpenHandClientController : IDisposable
 
         int revision = ++nextRevision;
         OpenHandRuntime.Set(player, selected, rememberedHotbarSlot, revision);
+        HudIndicatorPatch.RecomposeIndicator(capi);
         channel.SendPacket(new OpenHandSelectionRequest
         {
             Selected = selected,
@@ -212,6 +213,7 @@ internal sealed class OpenHandClientController : IDisposable
         {
             nextRevision = Math.Max(nextRevision, update.Revision);
             OpenHandRuntime.Set(localPlayer, update.Selected, update.RememberedHotbarSlot, update.Revision);
+            HudIndicatorPatch.RecomposeIndicator(capi);
         }
     }
 

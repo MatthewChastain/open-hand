@@ -14,7 +14,6 @@ public sealed class OpenHandModSystem : ModSystem
     private const string HarmonyId = "openhand.vs1227";
     private Harmony? harmony;
     private OpenHandClientController? clientController;
-    private OpenHandHudRenderer? hudRenderer;
     private OpenHandServerController? serverController;
 
     internal static ICoreClientAPI? ClientApi { get; private set; }
@@ -28,8 +27,6 @@ public sealed class OpenHandModSystem : ModSystem
         ClientApi = api;
         ApplyPatches(api);
         clientController = new OpenHandClientController(api);
-        hudRenderer = new OpenHandHudRenderer(api);
-        api.Event.RegisterRenderer(hudRenderer, EnumRenderStage.Ortho, "openhand-hud");
         RegisterStatusCommand(api);
 
         if (api.ModLoader.IsModEnabled("foreverempty"))
@@ -54,7 +51,8 @@ public sealed class OpenHandModSystem : ModSystem
     private static readonly Type[] PatchTypes =
     [
         typeof(ActiveHandPatch),
-        typeof(HudHotbarPatch)
+        typeof(HudHotbarPatch),
+        typeof(HudIndicatorPatch)
     ];
 
     private void ApplyPatches(ICoreAPI api)
@@ -112,7 +110,6 @@ public sealed class OpenHandModSystem : ModSystem
     public override void Dispose()
     {
         clientController?.Dispose();
-        hudRenderer?.Dispose();
         serverController?.Dispose();
         harmony?.UnpatchAll(HarmonyId);
         ClientApi = null;
