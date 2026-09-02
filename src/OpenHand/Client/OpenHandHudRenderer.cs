@@ -34,9 +34,18 @@ internal sealed class OpenHandHudRenderer : IRenderer
     {
         if (stage != EnumRenderStage.Ortho ||
             capi.HideGuis ||
-            capi.World?.Player is not IClientPlayer player ||
-            unselectedTexture is null ||
-            selectedTexture is null)
+            capi.World?.Player is not IClientPlayer player)
+        {
+            return;
+        }
+
+        // Fallback for when BlockTexturesLoaded fired before this renderer registered.
+        if (unselectedTexture is null || selectedTexture is null)
+        {
+            GenerateTextures();
+        }
+
+        if (unselectedTexture is not { } unselected || selectedTexture is not { } selectedTex)
         {
             return;
         }
@@ -47,11 +56,14 @@ internal sealed class OpenHandHudRenderer : IRenderer
         }
 
         bool selected = OpenHandRuntime.IsSelected(player);
-        LoadedTexture texture = selected ? selectedTexture : unselectedTexture;
+        LoadedTexture texture = selected ? selectedTex : unselected;
         float size = (float)slotZero.OuterWidth;
         double x = slotZero.renderX - size;
         double y = slotZero.renderY;
-        capi.Render.Render2DTexture(texture.TextureId, (float)x, (float)y, size, size);
+        // The HudHotbar composer bakes its background at zDepth 50 with depth
+        // testing enabled, so anything drawn at the default z of 10 loses the
+        // depth test and is invisible. Draw just above the dialog.
+        capi.Render.Render2DTexture(texture.TextureId, (float)x, (float)y, size, size, 51f);
     }
 
     /// <summary>
