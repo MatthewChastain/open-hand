@@ -2,6 +2,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>OpenHand.StateTests</AssemblyName>
+    <RequiresVintageStory>false</RequiresVintageStory>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/OpenHand/Common/OpenHandSelectionState.cs" Link="OpenHandSelectionState.cs" />

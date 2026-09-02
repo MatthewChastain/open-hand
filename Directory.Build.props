@@ -8,7 +8,8 @@
     <VintageStoryPath Condition="'$(VintageStoryPath)' == ''">$(VINTAGE_STORY)</VintageStoryPath>
   </PropertyGroup>
   <Import Project="Local.props" Condition="Exists('Local.props')" />
-  <Target Name="RequireVintageStoryPath" BeforeTargets="ResolveReferences" Condition="'$(VintageStoryPath)' == ''">
+  <!-- Projects that compile only against pure source (e.g. unit tests) set RequiresVintageStory=false. -->
+  <Target Name="RequireVintageStoryPath" BeforeTargets="ResolveReferences" Condition="'$(VintageStoryPath)' == '' And '$(RequiresVintageStory)' != 'false'">
     <Error Text="Set VintageStoryPath or VINTAGE_STORY to the Vintage Story installation directory." />
   </Target>
 </Project>
