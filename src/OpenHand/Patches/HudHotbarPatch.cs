@@ -21,7 +21,7 @@ internal static class HudHotbarPatch
         AccessTools.Field("Vintagestory.Client.NoObf.HudHotbar:hotbarSlotGrid");
 
     private static readonly AssetLocation IconLocation =
-        new AssetLocation("openhand", "textures/hud/openhand.jpg");
+        new AssetLocation("openhand", "textures/hud/openhand.png");
 
     private static int iconTextureId;
     private static bool iconLoadAttempted;
