@@ -27,6 +27,12 @@ public sealed class OpenHandModSystem : ModSystem
         ClientApi = api;
         ApplyPatches(api);
         clientController = new OpenHandClientController(api);
+
+        // GL texture IDs change across world transitions and texture reloads;
+        // drop the cached indicator texture so it is re-uploaded next render.
+        api.Event.LeftWorld += Patches.HudHotbarPatch.ResetIconTexture;
+        api.Event.ReloadTextures += Patches.HudHotbarPatch.ResetIconTexture;
+
         RegisterStatusCommand(api);
 
         if (api.ModLoader.IsModEnabled("foreverempty"))

@@ -26,6 +26,15 @@ internal static class HudHotbarPatch
     private static int iconTextureId;
     private static bool iconLoadAttempted;
 
+    // GL texture IDs are regenerated when leaving a world or reloading
+    // textures; a cached ID would silently point at whichever texture the GL
+    // reuses the handle for (e.g. the handbook close button).
+    internal static void ResetIconTexture()
+    {
+        iconTextureId = 0;
+        iconLoadAttempted = false;
+    }
+
     private static MethodBase? TargetMethod()
     {
         Type? type = AccessTools.TypeByName("Vintagestory.Client.NoObf.HudHotbar");
