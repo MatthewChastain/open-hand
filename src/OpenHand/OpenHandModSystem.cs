@@ -117,6 +117,14 @@ public sealed class OpenHandModSystem : ModSystem
         clientController?.Dispose();
         serverController?.Dispose();
         harmony?.UnpatchAll(HarmonyId);
+
+        ICoreClientAPI? clientApi = ClientApi;
+        if (clientApi is not null)
+        {
+            clientApi.Event.LeftWorld -= Patches.HudHotbarPatch.ResetIconTexture;
+            clientApi.Event.ReloadTextures -= Patches.HudHotbarPatch.ResetIconTexture;
+        }
+
         ClientApi = null;
     }
 }

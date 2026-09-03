@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import pathlib
 import sys
 import zipfile
@@ -7,7 +8,8 @@ import zipfile
 DETERMINISTIC_TIMESTAMP = (2000, 1, 1, 0, 0, 0)
 
 root = pathlib.Path(__file__).resolve().parents[1]
-version = sys.argv[1] if len(sys.argv) > 1 else "0.1.0"
+modinfo = json.loads((root / "src" / "OpenHand" / "modinfo.json").read_text())
+version = sys.argv[1] if len(sys.argv) > 1 else modinfo["version"]
 build = root / "src" / "OpenHand" / "bin" / "Release" / "net10.0"
 archive = root / "artifacts" / f"openhand_{version}.zip"
 
