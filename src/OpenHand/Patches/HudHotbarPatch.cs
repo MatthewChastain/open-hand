@@ -66,10 +66,12 @@ internal static class HudHotbarPatch
 
         ElementBounds slotZero = slotBounds[0];
         float size = (float)slotZero.OuterWidth;
-        float y = (float)slotZero.renderY;
+        // Adjust Y slightly up to align flush with the slot grid baseline.
+        float y = (float)slotZero.renderY - (float)GuiElement.scaled(1.0);
         float x = (float)slotZero.renderX - size;
 
-        // Center the cell evenly in the gap between the offhand slot and slot 0.
+        // Center the cell evenly in the gap between the offhand slot and slot 0,
+        // shifted slightly left to balance the visual gap evenly on both sides.
         if (__instance is GuiDialog dialog &&
             dialog.Composers["hotbar"]?.GetSlotGrid("offhandgrid") is GuiElementItemSlotGridBase offhandGrid &&
             offhandGrid.SlotBounds is { Length: > 0 } offBounds &&
@@ -77,11 +79,11 @@ internal static class HudHotbarPatch
         {
             double offhandRight = offBounds[0].renderX + offBounds[0].OuterWidth;
             double hotbarLeft = slotZero.renderX;
-            x = (float)((offhandRight + hotbarLeft - size) / 2.0);
+            x = (float)((offhandRight + hotbarLeft - size) / 2.0) - (float)GuiElement.scaled(1.5);
         }
         else
         {
-            x -= (float)GuiElement.scaled(2.0);
+            x -= (float)GuiElement.scaled(3.5);
         }
 
         // The Open Hand cell, centered in the gap left of the first main slot.
