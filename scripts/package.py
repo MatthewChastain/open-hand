@@ -25,7 +25,7 @@ def write_entry(output, path, archive_path):
 
 
 entries = []
-for path in required + [build / "OpenHand.pdb"]:
+for path in required + [build / "OpenHand.pdb", root / "src" / "OpenHand" / "modicon.png"]:
     if path.is_file():
         entries.append((path, path.name))
 # Ship binaries plus game assets: the game compiles any .cs files found in a

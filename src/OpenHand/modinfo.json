@@ -2,7 +2,7 @@
   "type": "code",
   "modid": "openhand",
   "name": "Open Hand",
-  "description": "A virtual, always-empty hand selection between hotbar slot 0 and the offhand.",
+  "description": "An always-empty hand option for the discerning adventurer.",
   "authors": ["Matthew Chastain"],
   "version": "0.1.0",
   "networkVersion": "1",
