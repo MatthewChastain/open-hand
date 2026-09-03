@@ -66,10 +66,25 @@ internal static class HudHotbarPatch
 
         ElementBounds slotZero = slotBounds[0];
         float size = (float)slotZero.OuterWidth;
-        float x = (float)slotZero.renderX - size;
         float y = (float)slotZero.renderY;
+        float x = (float)slotZero.renderX - size;
 
-        // The Open Hand cell, one slot pitch left of the first main slot.
+        // Center the cell evenly in the gap between the offhand slot and slot 0.
+        if (__instance is GuiDialog dialog &&
+            dialog.Composers["hotbar"]?.GetSlotGrid("offhandgrid") is GuiElementItemSlotGridBase offhandGrid &&
+            offhandGrid.SlotBounds is { Length: > 0 } offBounds &&
+            offBounds[0] is not null)
+        {
+            double offhandRight = offBounds[0].renderX + offBounds[0].OuterWidth;
+            double hotbarLeft = slotZero.renderX;
+            x = (float)((offhandRight + hotbarLeft - size) / 2.0);
+        }
+        else
+        {
+            x -= (float)GuiElement.scaled(2.0);
+        }
+
+        // The Open Hand cell, centered in the gap left of the first main slot.
         capi.Render.Render2DTexture(iconTextureId, x, y, size, size, 50f);
 
         // While selected, layer vanilla's own active slot highlight texture,
