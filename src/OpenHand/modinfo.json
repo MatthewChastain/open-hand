@@ -4,7 +4,7 @@
   "name": "Open Hand",
   "description": "An always-empty hand option for the discerning adventurer.",
   "authors": ["Matthew Chastain"],
-  "version": "0.1.0",
+  "version": "0.2.0",
   "networkVersion": "1",
   "side": "universal",
   "requiredOnClient": true,
