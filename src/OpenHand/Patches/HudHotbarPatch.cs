@@ -74,25 +74,24 @@ internal static class HudHotbarPatch
         }
 
         ElementBounds slotZero = slotBounds[0];
-        float size = (float)slotZero.OuterWidth;
-        // Adjusted 0.5 unscaled units down from previous -1.0 offset
-        float y = (float)slotZero.renderY - (float)GuiElement.scaled(0.5);
-        float x = (float)slotZero.renderX - size;
 
-        // Center the cell evenly in the gap between the offhand slot and slot 0,
-        // shifted 1.5 unscaled units left for balanced visual margins.
+        // Pixel-snap to the truncated screen coordinates vanilla renders slot
+        // textures at ((int)renderX/renderY, OuterWidthInt). Integer math in
+        // final screen pixels keeps the icon aligned with neighboring slots at
+        // every GUI scale and screen resolution.
+        int size = slotZero.OuterWidthInt;
+        int hotbarLeft = (int)slotZero.renderX;
+        int y = (int)slotZero.renderY - (int)Math.Round(GuiElement.scaled(0.5));
+        int x = hotbarLeft - size - (int)Math.Round(GuiElement.scaled(1.5));
+
+        // Center the cell evenly in the gap between the offhand slot and slot 0.
         if (__instance is GuiDialog dialog &&
             dialog.Composers["hotbar"]?.GetSlotGrid("offhandgrid") is GuiElementItemSlotGridBase offhandGrid &&
             offhandGrid.SlotBounds is { Length: > 0 } offBounds &&
             offBounds[0] is not null)
         {
-            double offhandRight = offBounds[0].renderX + offBounds[0].OuterWidth;
-            double hotbarLeft = slotZero.renderX;
-            x = (float)((offhandRight + hotbarLeft - size) / 2.0) - (float)GuiElement.scaled(1.5);
-        }
-        else
-        {
-            x -= (float)GuiElement.scaled(3.5);
+            int offhandRight = (int)offBounds[0].renderX + offBounds[0].OuterWidthInt;
+            x = (offhandRight + hotbarLeft - size) / 2 - (int)Math.Round(GuiElement.scaled(1.5));
         }
 
         // The Open Hand cell, centered in the gap left of the first main slot.
@@ -107,10 +106,10 @@ internal static class HudHotbarPatch
             {
                 capi.Render.Render2DTexturePremultipliedAlpha(
                     highlight.TextureId,
-                    (int)(x - 2f),
-                    (int)(y - 2f),
-                    (int)(size + 4f),
-                    (int)(size + 4f));
+                    x - 2,
+                    y - 2,
+                    size + 4,
+                    size + 4);
             }
         }
     }
