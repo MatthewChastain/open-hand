@@ -17,6 +17,13 @@ This is an early development build. Install it on both the client and server. Do
 
 Open Hand substitutes an empty `DummySlot` only when the engine resolves the active hand. The ten physical hotbar slots and offhand stay intact.
 
+## Branching & releases
+
+- `main` is the stable release branch and the default on GitHub. Changes land here only via pull request from `develop`, gated on the CI `state-tests` check.
+- `develop` is the main working branch; direct pushes are allowed.
+- To release: bump `version` in `src/OpenHand/modinfo.json` (and the csproj), merge `develop` into `main`, then tag `v<version>` and push the tag. The Release workflow builds and attaches the zip to the GitHub release automatically.
+- After switching the repository to public, run `bash scripts/setup-branch-protection.sh` once to enforce the branch rules (GitHub requires the repo to be public, or Pro, for branch protection).
+
 ## Build
 
 The project targets the exact Vintage Story 1.22.7 API. Set `VINTAGE_STORY` or create an ignored `Local.props` that sets `VintageStoryPath` to the game installation directory.
@@ -27,7 +34,7 @@ dotnet run --project tests/OpenHand.StateTests/OpenHand.StateTests.csproj -c Rel
 python3 scripts/package.py
 ```
 
-The release archive is written to `artifacts/openhand_0.1.0.zip`.
+The release archive is written to `artifacts/openhand_<version>.zip`, where `<version>` is read from `src/OpenHand/modinfo.json`.
 
 ## Manual validation
 
