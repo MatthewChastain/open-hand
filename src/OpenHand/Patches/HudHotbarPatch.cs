@@ -81,8 +81,8 @@ internal static class HudHotbarPatch
         // every GUI scale and screen resolution.
         int size = slotZero.OuterWidthInt;
         int hotbarLeft = (int)slotZero.renderX;
-        int y = (int)slotZero.renderY - (int)Math.Round(GuiElement.scaled(0.5));
-        int x = hotbarLeft - size - (int)Math.Round(GuiElement.scaled(1.5));
+        int y = (int)slotZero.renderY;
+        int x = hotbarLeft - size - (int)Math.Round(GuiElement.scaled(1.0));
 
         // Center the cell evenly in the gap between the offhand slot and slot 0.
         if (__instance is GuiDialog dialog &&
@@ -91,7 +91,7 @@ internal static class HudHotbarPatch
             offBounds[0] is not null)
         {
             int offhandRight = (int)offBounds[0].renderX + offBounds[0].OuterWidthInt;
-            x = (offhandRight + hotbarLeft - size) / 2 - (int)Math.Round(GuiElement.scaled(1.5));
+            x = (offhandRight + hotbarLeft - size) / 2 - (int)Math.Round(GuiElement.scaled(1.0));
         }
 
         // The Open Hand cell, centered in the gap left of the first main slot.
