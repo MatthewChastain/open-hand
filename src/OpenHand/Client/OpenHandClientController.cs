@@ -54,8 +54,12 @@ internal sealed class OpenHandClientController : IDisposable
 
     private void SelectOpenHand(IClientPlayer player)
     {
-        if (OpenHandRuntime.IsSelected(player))
+        OpenHandSelectionState current = OpenHandRuntime.Get(player);
+        if (current.IsSelected)
         {
+            // Toggle: pressing the hotkey again returns to the slot held before
+            // entering Open Hand.
+            DeselectToSlot(player, current.RememberedHotbarSlot);
             return;
         }
 
@@ -68,6 +72,19 @@ internal sealed class OpenHandClientController : IDisposable
         }
 
         RequestSelection(true, player.InventoryManager.ActiveHotbarSlotNumber, player);
+    }
+
+    private void DeselectToSlot(IClientPlayer player, int destination)
+    {
+        RequestSelection(false, destination, player);
+        int previousSlot = player.InventoryManager.ActiveHotbarSlotNumber;
+        player.InventoryManager.ActiveHotbarSlotNumber = destination;
+        // Same-value assignment raises no ActiveSlotChanged event, so restore
+        // the highlight the HUD patch removed while Open Hand was selected.
+        if (player.InventoryManager.ActiveHotbarSlotNumber == previousSlot)
+        {
+            HudHotbarPatch.RestoreHighlight(capi, destination);
+        }
     }
 
     private bool CancelHeldUse(IClientPlayer player)
@@ -118,17 +135,7 @@ internal sealed class OpenHandClientController : IDisposable
                 break;
             case OpenHandWheelRing.WheelAction.ExitToSlot:
                 args.SetHandled();
-                RequestSelection(false, decision.Destination, player);
-                int previousSlot = player.InventoryManager.ActiveHotbarSlotNumber;
-                player.InventoryManager.ActiveHotbarSlotNumber = decision.Destination;
-                // Same-value assignment raises no ActiveSlotChanged event, so
-                // restore the highlight the HUD patch removed while Open Hand
-                // was selected.
-                if (player.InventoryManager.ActiveHotbarSlotNumber == previousSlot)
-                {
-                    HudHotbarPatch.RestoreHighlight(capi, decision.Destination);
-                }
-
+                DeselectToSlot(player, decision.Destination);
                 break;
         }
     }

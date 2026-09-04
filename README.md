@@ -1,25 +1,34 @@
 # Open Hand
 
-Open Hand adds a virtual, always-empty main-hand selection to Vintage Story 1.22.7. It is not an inventory slot: it cannot be filled, moved, saved, crafted into, or targeted by inventory automation.
+An always-empty hand option for the discerning adventurer.
 
-## Status
+Adds a virtual, always-empty main-hand selection to Vintage Story. It is not an inventory slot: it cannot be filled, moved, saved, crafted into, or targeted by inventory automation. Current release: [v0.2.0](https://github.com/MatthewChastain/open-hand/releases/latest) — install on both the client and the server.
 
-This is an early development build. Install it on both the client and server. Do not run it alongside Forever Empty; both mods modify selected-hand behavior.
+## Supported versions
+
+Built and tested against Vintage Story **1.22.7**, and the packaged mod declares that game version as a dependency. The Harmony patches target internal APIs verified against the decompiled 1.22.7 assemblies, so newer game versions may not work until the mod is re-verified — each release's notes state the supported game version.
 
 ## Controls
 
-- Press `` ` `` (rebindable under Character Controls as **Select Open Hand**) to select Open Hand. Selecting it again while active changes nothing.
-- The mouse wheel ring is `1..0`, then Open Hand, then back to `1`. Scroll down from the `0` key slot (or from an occupied skill slot), or scroll up from the `1` key slot, to enter Open Hand.
-- Scroll again to leave it: scrolling down selects the `1` key slot; scrolling up selects the `0` key slot, or the skill slot while it is occupied.
-- Pressing any number key or selecting any physical hotbar slot leaves Open Hand.
-- Wheel scrolling keeps working normally in dialogs and vanilla backpack mode (raw key held).
-- Run `/openhand status` in chat for diagnostics: selection, remembered slot, server revision, and patch status.
+- Tilde (rebindable under Settings → Controls → Movement & character controls as **Select Open Hand**) selects Open Hand. Press it again to jump back to the slot you had selected before entering it.
+- The wheel ring runs `1` through `0`, then Open Hand, then back to `1`. Scroll down from the `0` slot — or from an occupied skill slot — or scroll up from the `1` slot to enter Open Hand.
+- Scroll once more to leave: down selects the `1` slot, up selects the `0` slot, or the skill slot while it holds an item.
+- Any number key or hotbar click leaves Open Hand.
+- Wheel scrolling works normally in dialogs and vanilla backpack mode.
+- `/openhand status` prints diagnostics: selection state, remembered slot, server revision, patch status.
 
-Open Hand substitutes an empty `DummySlot` only when the engine resolves the active hand. The ten physical hotbar slots and offhand stay intact.
+While Open Hand is selected the engine resolves the main hand as empty. The ten physical hotbar slots and the offhand are never touched.
+
+## Branching & releases
+
+- `main` is the stable release branch and the default on GitHub. Changes land here only via pull request from `develop`, gated on the CI `state-tests` check.
+- `develop` is the main working branch; direct pushes are allowed.
+- To release: bump `version` in `src/OpenHand/modinfo.json` (and the csproj), merge `develop` into `main`, then tag `v<version>` and push the tag. The Release workflow builds and attaches the zip to the GitHub release automatically.
+- After switching the repository to public, run `bash scripts/setup-branch-protection.sh` once to enforce the branch rules (GitHub requires the repo to be public, or Pro, for branch protection).
 
 ## Build
 
-The project targets the exact Vintage Story 1.22.7 API. Set `VINTAGE_STORY` or create an ignored `Local.props` that sets `VintageStoryPath` to the game installation directory.
+The project compiles against the Vintage Story 1.22.7 API (see Supported versions). Set `VINTAGE_STORY` or create an ignored `Local.props` that sets `VintageStoryPath` to the game installation directory.
 
 ```bash
 dotnet build OpenHand.sln -c Release
@@ -27,7 +36,7 @@ dotnet run --project tests/OpenHand.StateTests/OpenHand.StateTests.csproj -c Rel
 python3 scripts/package.py
 ```
 
-The release archive is written to `artifacts/openhand_0.1.0.zip`.
+The release archive is written to `artifacts/openhand_<version>.zip`, where `<version>` is read from `src/OpenHand/modinfo.json`.
 
 ## Manual validation
 
@@ -35,4 +44,4 @@ Before relying on the mod in a save, test a fully populated hotbar and offhand i
 
 ## Compatibility
 
-Open Hand detects and warns about Forever Empty. Remove Forever Empty before using Open Hand. Mods that directly cache or alter `ActiveHotbarSlot` may need compatibility work; please report a minimal reproduction with Vintage Story and mod versions.
+Do not run alongside Forever Empty; both mods modify selected-hand behavior, and Open Hand warns about the conflict on startup. Mods that cache or alter `ActiveHotbarSlot` directly may need compatibility work — open an issue with a minimal reproduction and your Vintage Story version.
