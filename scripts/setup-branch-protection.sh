@@ -35,7 +35,7 @@ JSON
         payload=$(jq '.required_pull_request_reviews = null' <<< "$payload")
     fi
 
-    gh api "repos/$REPO/branches/$branch/protection" -X PUT --input <<< "$payload" > /dev/null
+    printf '%s' "$payload" | gh api "repos/$REPO/branches/$branch/protection" -X PUT --input - > /dev/null
     echo "Protected $branch (PR required: $require_reviews, checks: state-tests)"
 }
 
