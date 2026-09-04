@@ -23,22 +23,25 @@ internal static class HudHotbarPatch
     private static readonly AssetLocation IconLocation =
         new AssetLocation("openhand", "textures/hud/openhand.png");
 
-    private static int iconTextureId;
-    private static bool iconLoadAttempted;
+    // The icon texture is baked at the CURRENT scaled slot size (high quality
+    // resample from the 48x48 asset) and drawn 1:1, so the GPU never scales
+    // the texture. Re-baked whenever the slot size changes (GUI scale) or the
+    // GL texture is invalidated (world transitions, texture reloads).
+    private static LoadedTexture? iconTexture;
+
+    private static MethodBase? TargetMethod()
+    {
+        Type? type = AccessTools.TypeByName("Vintagestory.Client.NoObf.HudHotbar");
+        return type is null ? null : AccessTools.Method(type, "OnRenderGUI");
+    }
 
     // GL texture IDs are regenerated when leaving a world or reloading
     // textures; a cached ID would silently point at whichever texture the GL
     // reuses the handle for (e.g. the handbook close button).
     internal static void ResetIconTexture()
     {
-        iconTextureId = 0;
-        iconLoadAttempted = false;
-    }
-
-    private static MethodBase? TargetMethod()
-    {
-        Type? type = AccessTools.TypeByName("Vintagestory.Client.NoObf.HudHotbar");
-        return type is null ? null : AccessTools.Method(type, "OnRenderGUI");
+        iconTexture?.Dispose();
+        iconTexture = null;
     }
 
     private static void Prefix(object __instance)
@@ -58,17 +61,6 @@ internal static class HudHotbarPatch
             HotbarGridField?.GetValue(__instance) is not GuiElementItemSlotGridBase grid ||
             grid.SlotBounds is not { Length: > 0 } slotBounds ||
             slotBounds[0] is null)
-        {
-            return;
-        }
-
-        if (iconTextureId == 0 && !iconLoadAttempted)
-        {
-            iconLoadAttempted = true;
-            iconTextureId = capi.Render.GetOrLoadTexture(IconLocation);
-        }
-
-        if (iconTextureId == 0)
         {
             return;
         }
@@ -94,8 +86,18 @@ internal static class HudHotbarPatch
             x = (offhandRight + hotbarLeft - size) / 2 - (int)Math.Round(GuiElement.scaled(1.0));
         }
 
+        // Re-bake when the icon texture is missing or the slot size changed.
+        if (iconTexture is null || iconTexture.Width != size)
+        {
+            BakeIconTexture(capi, size);
+            if (iconTexture is null || iconTexture.TextureId == 0)
+            {
+                return;
+            }
+        }
+
         // The Open Hand cell, centered in the gap left of the first main slot.
-        capi.Render.Render2DTexture(iconTextureId, x, y, size, size, 50f);
+        capi.Render.Render2DTexture(iconTexture.TextureId, x, y, size, size, 50f);
 
         // While selected, layer vanilla's own active slot highlight texture,
         // drawn exactly the way the slot grid draws it (2px overscan, z 50).
@@ -112,6 +114,75 @@ internal static class HudHotbarPatch
                     size + 4);
             }
         }
+    }
+
+    // Resamples the 48x48 asset to the target size with bilinear filtering and
+    // uploads it. Drawn 1:1 afterwards, so the GPU never scales the texture.
+    private static void BakeIconTexture(ICoreClientAPI capi, int targetSize)
+    {
+        IAsset? asset = capi.Assets.TryGet(IconLocation);
+        if (asset is null)
+        {
+            return;
+        }
+
+        BitmapRef source = asset.ToBitmap(capi);
+        try
+        {
+            int[] pixels = UpscaleBilinear(source.Pixels, source.Width, source.Height, targetSize, targetSize);
+            LoadedTexture texture = new LoadedTexture(capi) { Width = targetSize, Height = targetSize };
+            capi.Render.LoadOrUpdateTextureFromRgba(pixels, linearMag: true, clampMode: 0, ref texture);
+            iconTexture?.Dispose();
+            iconTexture = texture;
+        }
+        finally
+        {
+            source.Dispose();
+        }
+    }
+
+    private static int[] UpscaleBilinear(int[] source, int srcW, int srcH, int dstW, int dstH)
+    {
+        int[] dst = new int[dstW * dstH];
+        float xRatio = (float)srcW / dstW;
+        float yRatio = (float)srcH / dstH;
+
+        for (int dy = 0; dy < dstH; dy++)
+        {
+            float sy = (dy + 0.5f) * yRatio - 0.5f;
+            int y0 = Math.Clamp((int)MathF.Floor(sy), 0, srcH - 1);
+            int y1 = Math.Min(y0 + 1, srcH - 1);
+            float fy = Math.Clamp(sy - y0, 0f, 1f);
+
+            for (int dx = 0; dx < dstW; dx++)
+            {
+                float sx = (dx + 0.5f) * xRatio - 0.5f;
+                int x0 = Math.Clamp((int)MathF.Floor(sx), 0, srcW - 1);
+                int x1 = Math.Min(x0 + 1, srcW - 1);
+                float fx = Math.Clamp(sx - x0, 0f, 1f);
+
+                int p00 = source[y0 * srcW + x0];
+                int p10 = source[y0 * srcW + x1];
+                int p01 = source[y1 * srcW + x0];
+                int p11 = source[y1 * srcW + x1];
+
+                int a = Bilinear((p00 >> 24) & 0xFF, (p10 >> 24) & 0xFF, (p01 >> 24) & 0xFF, (p11 >> 24) & 0xFF, fx, fy);
+                int r = Bilinear((p00 >> 16) & 0xFF, (p10 >> 16) & 0xFF, (p01 >> 16) & 0xFF, (p11 >> 16) & 0xFF, fx, fy);
+                int g = Bilinear((p00 >> 8) & 0xFF, (p10 >> 8) & 0xFF, (p01 >> 8) & 0xFF, (p11 >> 8) & 0xFF, fx, fy);
+                int b = Bilinear(p00 & 0xFF, p10 & 0xFF, p01 & 0xFF, p11 & 0xFF, fx, fy);
+
+                dst[dy * dstW + dx] = (a << 24) | (r << 16) | (g << 8) | b;
+            }
+        }
+
+        return dst;
+    }
+
+    private static int Bilinear(int c00, int c10, int c01, int c11, float fx, float fy)
+    {
+        float top = c00 + (c10 - c00) * fx;
+        float bottom = c01 + (c11 - c01) * fx;
+        return (int)(top + (bottom - top) * fy);
     }
 
     // Re-applies the vanilla active slot highlight. Needed after exiting Open
