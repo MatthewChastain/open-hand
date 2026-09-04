@@ -171,7 +171,10 @@ internal static class HudHotbarPatch
                 int g = Bilinear((p00 >> 8) & 0xFF, (p10 >> 8) & 0xFF, (p01 >> 8) & 0xFF, (p11 >> 8) & 0xFF, fx, fy);
                 int b = Bilinear(p00 & 0xFF, p10 & 0xFF, p01 & 0xFF, p11 & 0xFF, fx, fy);
 
-                dst[dy * dstW + dx] = (a << 24) | (r << 16) | (g << 8) | b;
+                // LoadOrUpdateTextureFromRgba uploads with GL_RGBA, reading each
+                // int as memory bytes [R,G,B,A] - i.e. 0xAABBGGRR, the reverse of
+                // the source's 0xAARRGGBB layout.
+                dst[dy * dstW + dx] = (a << 24) | (b << 16) | (g << 8) | r;
             }
         }
 
