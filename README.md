@@ -8,7 +8,7 @@ This is an early development build. Install it on both the client and server. Do
 
 ## Controls
 
-- Press `` ` `` (rebindable under Character Controls as **Select Open Hand**) to select Open Hand. Selecting it again while active changes nothing.
+- Press `` ` `` (rebindable under Character Controls as **Select Open Hand**) to select Open Hand. Press it again to jump straight back to the slot you had selected before entering Open Hand, making the hotkey a quick toggle.
 - The mouse wheel ring is `1..0`, then Open Hand, then back to `1`. Scroll down from the `0` key slot (or from an occupied skill slot), or scroll up from the `1` key slot, to enter Open Hand.
 - Scroll again to leave it: scrolling down selects the `1` key slot; scrolling up selects the `0` key slot, or the skill slot while it is occupied.
 - Pressing any number key or selecting any physical hotbar slot leaves Open Hand.
