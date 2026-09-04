@@ -2,7 +2,11 @@
 
 An always-empty hand option for the discerning adventurer.
 
-Adds a virtual, always-empty main-hand selection to Vintage Story 1.22.7. It is not an inventory slot: it cannot be filled, moved, saved, crafted into, or targeted by inventory automation. Current release: [v0.2.0](https://github.com/MatthewChastain/open-hand/releases/latest) — install on both the client and the server.
+Adds a virtual, always-empty main-hand selection to Vintage Story. It is not an inventory slot: it cannot be filled, moved, saved, crafted into, or targeted by inventory automation. Current release: [v0.2.0](https://github.com/MatthewChastain/open-hand/releases/latest) — install on both the client and the server.
+
+## Supported versions
+
+Built and tested against Vintage Story **1.22.7**, and the packaged mod declares that game version as a dependency. The Harmony patches target internal APIs verified against the decompiled 1.22.7 assemblies, so newer game versions may not work until the mod is re-verified — each release's notes state the supported game version.
 
 ## Controls
 
@@ -24,7 +28,7 @@ While Open Hand is selected the engine resolves the main hand as empty. The ten 
 
 ## Build
 
-The project targets the exact Vintage Story 1.22.7 API. Set `VINTAGE_STORY` or create an ignored `Local.props` that sets `VintageStoryPath` to the game installation directory.
+The project compiles against the Vintage Story 1.22.7 API (see Supported versions). Set `VINTAGE_STORY` or create an ignored `Local.props` that sets `VintageStoryPath` to the game installation directory.
 
 ```bash
 dotnet build OpenHand.sln -c Release
