@@ -1,21 +1,19 @@
 # Open Hand
 
-Open Hand adds a virtual, always-empty main-hand selection to Vintage Story 1.22.7. It is not an inventory slot: it cannot be filled, moved, saved, crafted into, or targeted by inventory automation.
+An always-empty hand option for the discerning adventurer.
 
-## Status
-
-This is an early development build. Install it on both the client and server. Do not run it alongside Forever Empty; both mods modify selected-hand behavior.
+Adds a virtual, always-empty main-hand selection to Vintage Story 1.22.7. It is not an inventory slot: it cannot be filled, moved, saved, crafted into, or targeted by inventory automation. Current release: [v0.2.0](https://github.com/MatthewChastain/open-hand/releases/latest) — install on both the client and the server.
 
 ## Controls
 
-- Press `` ` `` (rebindable under Character Controls as **Select Open Hand**) to select Open Hand. Press it again to jump straight back to the slot you had selected before entering Open Hand, making the hotkey a quick toggle.
-- The mouse wheel ring is `1..0`, then Open Hand, then back to `1`. Scroll down from the `0` key slot (or from an occupied skill slot), or scroll up from the `1` key slot, to enter Open Hand.
-- Scroll again to leave it: scrolling down selects the `1` key slot; scrolling up selects the `0` key slot, or the skill slot while it is occupied.
-- Pressing any number key or selecting any physical hotbar slot leaves Open Hand.
-- Wheel scrolling keeps working normally in dialogs and vanilla backpack mode (raw key held).
-- Run `/openhand status` in chat for diagnostics: selection, remembered slot, server revision, and patch status.
+- Tilde (rebindable under Settings → Controls → Movement & character controls as **Select Open Hand**) selects Open Hand. Press it again to jump back to the slot you had selected before entering it.
+- The wheel ring runs `1` through `0`, then Open Hand, then back to `1`. Scroll down from the `0` slot — or from an occupied skill slot — or scroll up from the `1` slot to enter Open Hand.
+- Scroll once more to leave: down selects the `1` slot, up selects the `0` slot, or the skill slot while it holds an item.
+- Any number key or hotbar click leaves Open Hand.
+- Wheel scrolling works normally in dialogs and vanilla backpack mode.
+- `/openhand status` prints diagnostics: selection state, remembered slot, server revision, patch status.
 
-Open Hand substitutes an empty `DummySlot` only when the engine resolves the active hand. The ten physical hotbar slots and offhand stay intact.
+While Open Hand is selected the engine resolves the main hand as empty. The ten physical hotbar slots and the offhand are never touched.
 
 ## Branching & releases
 
@@ -42,4 +40,4 @@ Before relying on the mod in a save, test a fully populated hotbar and offhand i
 
 ## Compatibility
 
-Open Hand detects and warns about Forever Empty. Remove Forever Empty before using Open Hand. Mods that directly cache or alter `ActiveHotbarSlot` may need compatibility work; please report a minimal reproduction with Vintage Story and mod versions.
+Do not run alongside Forever Empty; both mods modify selected-hand behavior, and Open Hand warns about the conflict on startup. Mods that cache or alter `ActiveHotbarSlot` directly may need compatibility work — open an issue with a minimal reproduction and your Vintage Story version.
