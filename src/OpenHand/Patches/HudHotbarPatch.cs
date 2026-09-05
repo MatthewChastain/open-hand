@@ -142,6 +142,17 @@ internal static class HudHotbarPatch
             int backgroundY = y - frameSize;
             int backgroundWidth = size + frameSize * 2;
             int backgroundHeight = size + frameSize * 2;
+            if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
+            {
+                // The extension ends exactly where the real hotbar backdrop
+                // begins and matches its complete rendered height, including
+                // its lower edge at the screen bottom.
+                int hotbarLeft = (int)hotbarBounds.renderX;
+                backgroundX = hotbarLeft - size - frameSize * 2;
+                backgroundY = (int)hotbarBounds.renderY;
+                backgroundWidth = hotbarLeft - backgroundX;
+                backgroundHeight = hotbarBounds.OuterHeightInt;
+            }
             if (hotbarExtensionTexture is null ||
                 hotbarExtensionTexture.Width != backgroundWidth ||
                 hotbarExtensionTexture.Height != backgroundHeight)
@@ -263,11 +274,22 @@ internal static class HudHotbarPatch
                         // No free gap anywhere on the row: use the Open Hand
                         // cell artwork as a visual extension immediately left
                         // of the whole bar rather than covering a neighbor.
-                        // Use the same three-pixel scaled frame as the brown
-                        // panel. The icon ends one full frame before the
-                        // hotbar and the panel's right edge meets (but never
-                        // covers) the row's left edge.
+                        // Use the hotbar composer's outer bounds, not its
+                        // first slot, to reserve a whole external panel. This
+                        // gives the extension its full screen-bottom height
+                        // and keeps the hand entirely outside the hotbar.
                         int frameSize = Math.Max(1, (int)Math.Round(GuiElement.scaled(3.0)));
+                        if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
+                        {
+                            int hotbarLeft = (int)hotbarBounds.renderX;
+                            int iconY = (int)hotbarBounds.renderY +
+                                (hotbarBounds.OuterHeightInt - size) / 2;
+                            int iconX = hotbarLeft - size - frameSize;
+                            return (iconX, iconY, true, $"left extension x={iconX} hotbar=[{hotbarLeft}..{hotbarLeft + hotbarBounds.OuterWidthInt}] (no free gap; {RowIntervals.Count} cells)");
+                        }
+
+                        // A missing composer must remain non-fatal; use the
+                        // detected row as the conservative fallback.
                         int extensionX = placement.RowStart - size - frameSize;
                         return (extensionX, slotZeroY, true, $"left extension x={extensionX} (no free gap; {RowIntervals.Count} cells)");
                     }
@@ -325,6 +347,21 @@ internal static class HudHotbarPatch
             probeRowEnd = Math.Max(probeRowEnd, end);
         }
 
+        return true;
+    }
+
+    private static bool TryGetHotbarBounds(object instance, out ElementBounds bounds)
+    {
+        bounds = null!;
+        if (instance is not GuiDialog dialog ||
+            dialog.Composers["hotbar"]?.Bounds is not ElementBounds hotbarBounds ||
+            hotbarBounds.OuterWidthInt <= 0 ||
+            hotbarBounds.OuterHeightInt <= 0)
+        {
+            return false;
+        }
+
+        bounds = hotbarBounds;
         return true;
     }
 
