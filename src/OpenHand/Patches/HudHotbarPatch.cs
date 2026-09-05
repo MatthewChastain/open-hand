@@ -138,22 +138,23 @@ internal static class HudHotbarPatch
         if (drawHotbarExtension)
         {
             int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
-            int verticalPadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(12.0)));
+            int hotbarTopInset = Math.Max(1, (int)Math.Round(GuiElement.scaled(10.0)));
+            int hotbarHeight = Math.Max(1, (int)Math.Round(GuiElement.scaled(80.0)));
             int backgroundX = x - sidePadding;
-            int backgroundY = y - verticalPadding;
+            int backgroundY = y - hotbarTopInset;
             int backgroundWidth = size + sidePadding * 2;
-            int backgroundHeight = size + verticalPadding * 2;
+            int backgroundHeight = hotbarHeight;
             if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
             {
                 // The extension ends exactly where the real hotbar backdrop
-                // begins. Its height is derived from the row cell so it
-                // aligns with the actual hotbar, not unrelated HUD widgets
-                // included in the composer's larger bounds.
+                // begins. Its known vanilla 80px unscaled height and 10px
+                // row inset align it with the actual hotbar, not unrelated
+                // HUD widgets included in the composer's larger bounds.
                 int hotbarLeft = (int)hotbarBounds.renderX;
                 backgroundX = hotbarLeft - size - sidePadding * 2;
-                backgroundY = y - verticalPadding;
+                backgroundY = y - hotbarTopInset;
                 backgroundWidth = hotbarLeft - backgroundX;
-                backgroundHeight = size + verticalPadding * 2;
+                backgroundHeight = hotbarHeight;
             }
             if (hotbarExtensionTexture is null ||
                 hotbarExtensionTexture.Width != backgroundWidth ||
