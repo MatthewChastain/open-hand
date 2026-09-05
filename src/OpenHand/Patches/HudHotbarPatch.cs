@@ -116,9 +116,9 @@ internal static class HudHotbarPatch
         // Pixel-snap to the truncated screen coordinates vanilla renders slot
         // textures at ((int)renderX/renderY, OuterWidthInt). Integer math in
         // final screen pixels keeps the icon aligned with neighboring slots at
-        // every GUI scale and screen resolution. The anchor probes the row's
-        // actual layout each frame so other mods that add or move hotbar cells
-        // keep the icon aligned without any per-mod special-casing.
+        // every GUI scale and screen resolution. Automatic placement uses an
+        // external left panel so it cannot obstruct the vanilla reserved
+        // mission-skill gap; explicit left/right anchors probe the row.
         int size = slotZero.OuterWidthInt;
         (int x, int y, bool drawHotbarExtension, string placementDescription) = ResolvePlacement(__instance, slotZero, size);
         x += config.IconOffsetX;
@@ -194,10 +194,9 @@ internal static class HudHotbarPatch
         }
     }
 
-    // Resolves the indicator cell position from the hotbar row's ACTUAL
-    // rendered layout. In vanilla this reproduces the original offhand-gap
-    // centering exactly; when other mods add or move row cells, the same math
-    // follows the new layout instead of assuming vanilla geometry.
+    // Resolves the indicator cell position. Automatic placement always uses a
+    // safe external left panel; explicit left/right anchors follow the actual
+    // rendered row, while offhandGap remains an intentional legacy override.
     private static (int X, int Y, bool DrawHotbarExtension, string Description) ResolvePlacement(object __instance, ElementBounds slotZero, int size)
     {
         int slotZeroX = (int)slotZero.renderX;
@@ -208,12 +207,12 @@ internal static class HudHotbarPatch
         // Left of slot 0 is today's fallback whenever the layout cannot be
         // probed; explicit anchors degrade the same graceful way.
         const string FallbackDescription = "left of slot 0 (row probe unavailable)";
-        bool haveRow = TryCollectRowIntervals(slotZeroY, size);
 
         switch (anchorMode)
         {
             case IconAnchorMode.Left:
             {
+                bool haveRow = TryCollectRowIntervals(slotZeroY, size);
                 if (!haveRow)
                 {
                     return (fallbackX, slotZeroY, false, FallbackDescription);
@@ -224,6 +223,7 @@ internal static class HudHotbarPatch
 
             case IconAnchorMode.Right:
             {
+                bool haveRow = TryCollectRowIntervals(slotZeroY, size);
                 if (!haveRow)
                 {
                     return (fallbackX, slotZeroY, false, FallbackDescription);
@@ -248,53 +248,19 @@ internal static class HudHotbarPatch
 
             default:
             {
-                if (!haveRow)
+                // The vanilla offhand gap is a reserved mission-skill
+                // location, so automatic placement must never occupy it.
+                // Always reserve an external panel left of the hotbar instead.
+                int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
+                if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
                 {
-                    return (fallbackX, slotZeroY, false, FallbackDescription);
+                    int hotbarLeft = (int)hotbarBounds.renderX;
+                    int iconX = hotbarLeft - size - sidePadding;
+                    return (iconX, slotZeroY, true, $"left extension x={iconX} hotbar=[{hotbarLeft}..{hotbarLeft + hotbarBounds.OuterWidthInt}]");
                 }
 
-                (int, int)? preferred = __instance is GuiDialog autoDialog &&
-                    TryGetOffhandGap(autoDialog, slotZeroX, out (int Start, int End) autoGap)
-                        ? autoGap
-                        : null;
-                OpenHandGapSolver.GapPlacement placement = OpenHandGapSolver.Place(RowIntervals, size, preferred);
-                switch (placement.Choice)
-                {
-                    case OpenHandGapSolver.GapChoice.Preferred:
-                    {
-                        int x = placement.X - padding;
-                        return (x, slotZeroY, false, $"preferred gap x={x} row=[{placement.RowStart}..{placement.RowEnd}] ({RowIntervals.Count} cells)");
-                    }
-
-                    case OpenHandGapSolver.GapChoice.Largest:
-                    {
-                        int x = placement.X - padding;
-                        return (x, slotZeroY, false, $"largest gap x={x} row=[{placement.RowStart}..{placement.RowEnd}] ({RowIntervals.Count} cells)");
-                    }
-
-                    default:
-                    {
-                        // No free gap anywhere on the row: use the Open Hand
-                        // cell artwork as a visual extension immediately left
-                        // of the whole bar rather than covering a neighbor.
-                        // Use the hotbar composer's left edge, not its first
-                        // slot, to reserve a whole external panel. The icon
-                        // stays top-aligned with the physical row cells.
-                        int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
-                        if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
-                        {
-                            int hotbarLeft = (int)hotbarBounds.renderX;
-                            int iconX = hotbarLeft - size - sidePadding;
-                            int iconY = slotZeroY;
-                            return (iconX, iconY, true, $"left extension x={iconX} hotbar=[{hotbarLeft}..{hotbarLeft + hotbarBounds.OuterWidthInt}] (no free gap; {RowIntervals.Count} cells)");
-                        }
-
-                        // A missing composer must remain non-fatal; use the
-                        // detected row as the conservative fallback.
-                        int extensionX = placement.RowStart - size - sidePadding;
-                        return (extensionX, slotZeroY, true, $"left extension x={extensionX} (no free gap; {RowIntervals.Count} cells)");
-                    }
-                }
+                // A missing composer must remain non-fatal.
+                return (fallbackX, slotZeroY, true, "left extension (hotbar bounds unavailable)");
             }
         }
     }

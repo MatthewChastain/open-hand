@@ -10,8 +10,9 @@ public sealed class OpenHandClientConfig
 
     /// <summary>
     /// Where the indicator cell is drawn relative to the hotbar row:
-    /// auto (probe the rendered row for a free gap), offhandGap (the classic
-    /// vanilla position), left of the row, or right of the row.
+    /// auto (a compatible external panel left of the hotbar), offhandGap
+    /// (the classic but reserved vanilla position), left of the row, or
+    /// right of the row.
     /// </summary>
     public string IconAnchor { get; set; } = "auto";
 
