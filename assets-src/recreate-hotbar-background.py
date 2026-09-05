@@ -28,9 +28,11 @@ runs from (0,0) to (W, H-1), so the strokes clip at the surface edges) - the
 composed surface is opaque and the blur edge-clamps on every side.
 
 The Open Hand extension panel is the LEFT END of that same bar: identical rim
-treatment on top/left/bottom, but no right edge (the hotbar's own left edge
-provides the junction), so the texture is composed on a wider canvas with the
-fill continuing rightward and cropped to 64 px.
+treatment on top/left/bottom, but no right edge. It overlaps the vanilla
+backdrop by 24 px, completely covering that backdrop's left-rim blur tail.
+Its grain is phase-shifted by the pre-overlap panel width so the overlapping
+pixels and the pixels immediately after them continue the vanilla grain
+without a pattern discontinuity.
 """
 
 from __future__ import annotations
@@ -65,7 +67,9 @@ BLUR_SIGMA = 9  # BlurFull(scaled(9)), GUIScale = 1
 CORNER_RADIUS = 1  # GuiStyle.DialogBGRadius, scaled
 SS = 4  # supersampling factor so strokes get Cairo-quality antialiasing
 
-EXT_W, EXT_H = 64, 80  # extension panel: 48px slot + 2 * 8px padding, 80px bar
+EXT_BASE_W = 64  # 48px slot + 2 * 8px padding
+JOIN_OVERLAP = 24  # covers the vanilla left-edge blur tail (~24px)
+EXT_W, EXT_H = EXT_BASE_W + JOIN_OVERLAP, 80
 VAN_W, VAN_H = 850, 80  # vanilla hotbar backdrop
 
 
@@ -145,17 +149,16 @@ def stroke_layer(
     return _downsample(img, w + margin, h)
 
 
-def grain_layer(w: int, h: int, margin: int, interior_mask: np.ndarray) -> np.ndarray:
+def grain_layer(
+    w: int, h: int, margin: int, interior_mask: np.ndarray, x_offset: int = 0
+) -> np.ndarray:
     """soil.png at 25% alpha, 8x nearest blowup, clipped to the path interior."""
     soil = Image.open(SOIL_PATH).convert("RGBA")
     tile = soil.resize((soil.width * GRAIN_BLOWUP, soil.height * GRAIN_BLOWUP), Image.NEAREST)
-    tiles_x = (w + margin + tile.width - 1) // tile.width
-    tiles_y = (h + tile.height - 1) // tile.height
-    canvas = Image.new("RGBA", (tiles_x * tile.width, tiles_y * tile.height))
-    for ty in range(tiles_y):
-        for tx in range(tiles_x):
-            canvas.paste(tile, (tx * tile.width, ty * tile.height))
-    grain = np.asarray(canvas, dtype=np.float64)[:h, : w + margin] / 255.0
+    source = np.asarray(tile, dtype=np.float64) / 255.0
+    xs = (np.arange(w + margin) + x_offset) % tile.width
+    ys = np.arange(h) % tile.height
+    grain = source[ys[:, None], xs[None, :]]
     grain[..., 3:4] = GRAIN_ALPHA
     grain[..., 3:4] *= interior_mask
     return grain
@@ -181,7 +184,10 @@ def compose(w: int, h: int, open_right: bool = False) -> np.ndarray:
 
     # Grain fills the path interior only (FillPreserve after the blur).
     interior = (fill[..., 3] > 0.5).astype(np.float64)[..., None]
-    base = over(base, grain_layer(w, h, margin, interior))
+    # The extension begins 64px left of the vanilla backdrop. Shift its soil
+    # source by -64px, so extension pixel 64 is precisely vanilla pixel 0.
+    grain_offset = -EXT_BASE_W if open_right else 0
+    base = over(base, grain_layer(w, h, margin, interior, grain_offset))
 
     # Border: rgba(45,35,33,0.5625), width strokeWidth = 5.
     border = stroke_layer(
@@ -198,12 +204,12 @@ def save_png(path: Path, arr: np.ndarray) -> None:
     Image.fromarray(np.round(arr * 255).astype(np.uint8), "RGBA").save(path)
 
 
-def layer_pngs(arr: np.ndarray, fill_glow: np.ndarray, grain: np.ndarray, interior: np.ndarray,
-               border: np.ndarray, outdir: Path, prefix: str) -> list[Path]:
+def layer_pngs(base: np.ndarray, grain: np.ndarray, interior: np.ndarray, border: np.ndarray,
+               outdir: Path, prefix: str) -> list[Path]:
     """Write the three XCF layer images (bottom -> top)."""
     paths = []
     specs = [
-        (f"{prefix}-1-fill-glow-blurred.png", fill_glow),
+        (f"{prefix}-1-fill-glow-blurred.png", base),
         (f"{prefix}-2-soil-grain-25pct.png",
          np.concatenate([grain[..., :3], grain[..., 3:4] * interior], axis=-1)),
         (f"{prefix}-3-border-stroke.png", border),
@@ -297,9 +303,10 @@ def main() -> None:
                 axis=-1,
             )
             interior = (fill[..., 3] > 0.5).astype(np.float64)[..., None]
-            grain = grain_layer(w, h, margin, interior)
+            grain_offset = -EXT_BASE_W if open_right else 0
+            grain = grain_layer(w, h, margin, interior, grain_offset)
             border = stroke_layer(w, h, margin, 2.5, 5.0, BORDER_RGB, BORDER_ALPHA)
-            layers = layer_pngs(None, fill_glow, grain, interior, border, tmp, prefix)
+            layers = layer_pngs(bottom, grain, interior, border, tmp, prefix)
             if open_right:
                 layers = []
                 for p in [tmp / f"{prefix}-1-fill-glow-blurred.png",
@@ -317,7 +324,7 @@ def main() -> None:
     # --- diagnostics ------------------------------------------------------
     for arr, label, col in [
         (van, "vanilla 850x80", VAN_W // 2),
-        (ext, "extension 64x80", EXT_W // 2),
+        (ext, f"extension {EXT_W}x{EXT_H}", EXT_W // 2),
     ]:
         report(arr, label, col)
 

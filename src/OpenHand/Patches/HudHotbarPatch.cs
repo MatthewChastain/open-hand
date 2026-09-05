@@ -138,22 +138,27 @@ internal static class HudHotbarPatch
         if (drawHotbarExtension)
         {
             int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
+            // The hotbar's 9px full blur leaves its left-edge rim visible for
+            // roughly 24 scaled pixels into its own backdrop. Draw beneath
+            // that whole tail so the extension reads as one continuous bar,
+            // rather than terminating against a dark vertical seam.
+            int joinOverlap = Math.Max(1, (int)Math.Round(GuiElement.scaled(24.0)));
             int hotbarTopInset = Math.Max(1, (int)Math.Round(GuiElement.scaled(10.0)));
             int hotbarHeight = Math.Max(1, (int)Math.Round(GuiElement.scaled(80.0)));
             int backgroundX = x - sidePadding;
             int backgroundY = y - hotbarTopInset;
-            int backgroundWidth = size + sidePadding * 2;
+            int backgroundWidth = size + sidePadding * 2 + joinOverlap;
             int backgroundHeight = hotbarHeight;
             if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
             {
-                // The extension ends exactly where the real hotbar backdrop
-                // begins. Its known vanilla 80px unscaled height and 10px
-                // row inset align it with the actual hotbar, not unrelated
-                // HUD widgets included in the composer's larger bounds.
+                // The extension overlaps the real backdrop's left edge, while
+                // its known vanilla 80px unscaled height and 10px row inset
+                // align it with the actual hotbar, not unrelated HUD widgets
+                // included in the composer's larger bounds.
                 int hotbarLeft = (int)hotbarBounds.renderX;
                 backgroundX = hotbarLeft - size - sidePadding * 2;
                 backgroundY = y - hotbarTopInset;
-                backgroundWidth = hotbarLeft - backgroundX;
+                backgroundWidth = hotbarLeft - backgroundX + joinOverlap;
                 backgroundHeight = hotbarHeight;
             }
             if (hotbarExtensionTexture is null ||
