@@ -137,21 +137,23 @@ internal static class HudHotbarPatch
 
         if (drawHotbarExtension)
         {
-            int frameSize = Math.Max(1, (int)Math.Round(GuiElement.scaled(3.0)));
-            int backgroundX = x - frameSize;
-            int backgroundY = y - frameSize;
-            int backgroundWidth = size + frameSize * 2;
-            int backgroundHeight = size + frameSize * 2;
+            int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
+            int verticalPadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(12.0)));
+            int backgroundX = x - sidePadding;
+            int backgroundY = y - verticalPadding;
+            int backgroundWidth = size + sidePadding * 2;
+            int backgroundHeight = size + verticalPadding * 2;
             if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
             {
                 // The extension ends exactly where the real hotbar backdrop
-                // begins and matches its complete rendered height, including
-                // its lower edge at the screen bottom.
+                // begins. Its height is derived from the row cell so it
+                // aligns with the actual hotbar, not unrelated HUD widgets
+                // included in the composer's larger bounds.
                 int hotbarLeft = (int)hotbarBounds.renderX;
-                backgroundX = hotbarLeft - size - frameSize * 2;
-                backgroundY = (int)hotbarBounds.renderY;
+                backgroundX = hotbarLeft - size - sidePadding * 2;
+                backgroundY = y - verticalPadding;
                 backgroundWidth = hotbarLeft - backgroundX;
-                backgroundHeight = hotbarBounds.OuterHeightInt;
+                backgroundHeight = size + verticalPadding * 2;
             }
             if (hotbarExtensionTexture is null ||
                 hotbarExtensionTexture.Width != backgroundWidth ||
@@ -274,23 +276,21 @@ internal static class HudHotbarPatch
                         // No free gap anywhere on the row: use the Open Hand
                         // cell artwork as a visual extension immediately left
                         // of the whole bar rather than covering a neighbor.
-                        // Use the hotbar composer's outer bounds, not its
-                        // first slot, to reserve a whole external panel. This
-                        // gives the extension its full screen-bottom height
-                        // and keeps the hand entirely outside the hotbar.
-                        int frameSize = Math.Max(1, (int)Math.Round(GuiElement.scaled(3.0)));
+                        // Use the hotbar composer's left edge, not its first
+                        // slot, to reserve a whole external panel. The icon
+                        // stays top-aligned with the physical row cells.
+                        int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
                         if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
                         {
                             int hotbarLeft = (int)hotbarBounds.renderX;
-                            int iconY = (int)hotbarBounds.renderY +
-                                (hotbarBounds.OuterHeightInt - size) / 2;
-                            int iconX = hotbarLeft - size - frameSize;
+                            int iconX = hotbarLeft - size - sidePadding;
+                            int iconY = slotZeroY;
                             return (iconX, iconY, true, $"left extension x={iconX} hotbar=[{hotbarLeft}..{hotbarLeft + hotbarBounds.OuterWidthInt}] (no free gap; {RowIntervals.Count} cells)");
                         }
 
                         // A missing composer must remain non-fatal; use the
                         // detected row as the conservative fallback.
-                        int extensionX = placement.RowStart - size - frameSize;
+                        int extensionX = placement.RowStart - size - sidePadding;
                         return (extensionX, slotZeroY, true, $"left extension x={extensionX} (no free gap; {RowIntervals.Count} cells)");
                     }
                 }
