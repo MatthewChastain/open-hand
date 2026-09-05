@@ -263,9 +263,12 @@ internal static class HudHotbarPatch
                         // No free gap anywhere on the row: use the Open Hand
                         // cell artwork as a visual extension immediately left
                         // of the whole bar rather than covering a neighbor.
-                        // Keep one vanilla-sized gutter so its dark border
-                        // reads as another hotbar cell, not an overlap.
-                        int extensionX = placement.RowStart - size - padding;
+                        // Use the same three-pixel scaled frame as the brown
+                        // panel. The icon ends one full frame before the
+                        // hotbar and the panel's right edge meets (but never
+                        // covers) the row's left edge.
+                        int frameSize = Math.Max(1, (int)Math.Round(GuiElement.scaled(3.0)));
+                        int extensionX = placement.RowStart - size - frameSize;
                         return (extensionX, slotZeroY, true, $"left extension x={extensionX} (no free gap; {RowIntervals.Count} cells)");
                     }
                 }
