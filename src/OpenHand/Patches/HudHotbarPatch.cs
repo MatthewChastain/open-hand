@@ -20,16 +20,60 @@ internal static class HudHotbarPatch
     private static readonly FieldInfo? HotbarGridField =
         AccessTools.Field("Vintagestory.Client.NoObf.HudHotbar:hotbarSlotGrid");
 
+    // Reflection reads (never patches) enumerating a composer's named elements.
+    // Decompile evidence (VS 1.22.7): GuiComposer.staticElements and
+    // GuiComposer.interactiveElements are internal Dictionary<string, GuiElement>
+    // (VintagestoryApi/Client/UI/GuiComposer.cs:38-39). This is what makes
+    // placement generic: every slot grid a mod adds to the hotbar dialog is
+    // visible here regardless of which mod added it or what it is named.
+    private static readonly FieldInfo? ComposerStaticElementsField =
+        AccessTools.Field("Vintagestory.API.Client.GuiComposer:staticElements");
+
+    private static readonly FieldInfo? ComposerInteractiveElementsField =
+        AccessTools.Field("Vintagestory.API.Client.GuiComposer:interactiveElements");
+
     private static readonly AssetLocation IconLocation =
         new AssetLocation("openhand", "textures/hud/openhand.png");
+    private static readonly AssetLocation HotbarExtensionLocation =
+        new AssetLocation("openhand", "textures/hud/hotbar-extension.png");
 
     // The icon texture is baked at the CURRENT scaled slot size (high quality
     // resample from the 48x48 asset) and drawn 1:1, so the GPU never scales
     // the texture. Re-baked whenever the slot size changes (GUI scale) or the
     // GL texture is invalidated (world transitions, texture reloads).
     private static LoadedTexture? iconTexture;
+    private static LoadedTexture? hotbarExtensionTexture;
 
-    private static MethodBase? TargetMethod()
+    // Client config (openhand.json); defaults until StartClientSide loads the
+    // real file. Client-only by definition, mirroring the ClientApi singleton.
+    private static OpenHandClientConfig config = new();
+
+    private static IconAnchorMode anchorMode = IconAnchorMode.Auto;
+
+    // Reused across frames to keep the per-frame probe allocation-free.
+    private static readonly List<(int Start, int End)> RowIntervals = new();
+
+    private static int probeRowStart;
+
+    private static int probeRowEnd;
+
+    private static bool loggedProbeFailure;
+
+    private static string lastPlacementDescription = "not rendered yet";
+
+    internal static void ApplyConfig(OpenHandClientConfig value, IconAnchorMode mode)
+    {
+        config = value;
+        anchorMode = mode;
+        loggedProbeFailure = false;
+    }
+
+    internal static string DescribeIconPlacement()
+    {
+        return $"{anchorMode.ToString().ToLowerInvariant()} offset=({config.IconOffsetX},{config.IconOffsetY}) | last render: {lastPlacementDescription}";
+    }
+
+    internal static MethodBase? TargetMethod()
     {
         Type? type = AccessTools.TypeByName("Vintagestory.Client.NoObf.HudHotbar");
         return type is null ? null : AccessTools.Method(type, "OnRenderGUI");
@@ -42,6 +86,8 @@ internal static class HudHotbarPatch
     {
         iconTexture?.Dispose();
         iconTexture = null;
+        hotbarExtensionTexture?.Dispose();
+        hotbarExtensionTexture = null;
     }
 
     private static void Prefix(object __instance)
@@ -70,21 +116,14 @@ internal static class HudHotbarPatch
         // Pixel-snap to the truncated screen coordinates vanilla renders slot
         // textures at ((int)renderX/renderY, OuterWidthInt). Integer math in
         // final screen pixels keeps the icon aligned with neighboring slots at
-        // every GUI scale and screen resolution.
+        // every GUI scale and screen resolution. Automatic placement uses an
+        // external left panel so it cannot obstruct the vanilla reserved
+        // mission-skill gap; explicit left/right anchors probe the row.
         int size = slotZero.OuterWidthInt;
-        int hotbarLeft = (int)slotZero.renderX;
-        int y = (int)slotZero.renderY;
-        int x = hotbarLeft - size - (int)Math.Round(GuiElement.scaled(1.0));
-
-        // Center the cell evenly in the gap between the offhand slot and slot 0.
-        if (__instance is GuiDialog dialog &&
-            dialog.Composers["hotbar"]?.GetSlotGrid("offhandgrid") is GuiElementItemSlotGridBase offhandGrid &&
-            offhandGrid.SlotBounds is { Length: > 0 } offBounds &&
-            offBounds[0] is not null)
-        {
-            int offhandRight = (int)offBounds[0].renderX + offBounds[0].OuterWidthInt;
-            x = (offhandRight + hotbarLeft - size) / 2 - (int)Math.Round(GuiElement.scaled(1.0));
-        }
+        (int x, int y, bool drawHotbarExtension, string placementDescription) = ResolvePlacement(__instance, slotZero, size);
+        x += config.IconOffsetX;
+        y += config.IconOffsetY;
+        lastPlacementDescription = placementDescription;
 
         // Re-bake when the icon texture is missing or the slot size changed.
         if (iconTexture is null || iconTexture.Width != size)
@@ -96,7 +135,46 @@ internal static class HudHotbarPatch
             }
         }
 
-        // The Open Hand cell, centered in the gap left of the first main slot.
+        if (drawHotbarExtension)
+        {
+            int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
+            int hotbarTopInset = Math.Max(1, (int)Math.Round(GuiElement.scaled(10.0)));
+            int hotbarHeight = Math.Max(1, (int)Math.Round(GuiElement.scaled(80.0)));
+            int backgroundX = x - sidePadding;
+            int backgroundY = y - hotbarTopInset;
+            int backgroundWidth = size + sidePadding * 2;
+            int backgroundHeight = hotbarHeight;
+            if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
+            {
+                // The extension ends exactly where the real hotbar backdrop
+                // begins. Its known vanilla 80px unscaled height and 10px
+                // row inset align it with the actual hotbar, not unrelated
+                // HUD widgets included in the composer's larger bounds.
+                int hotbarLeft = (int)hotbarBounds.renderX;
+                backgroundX = hotbarLeft - size - sidePadding * 2;
+                backgroundY = y - hotbarTopInset;
+                backgroundWidth = hotbarLeft - backgroundX;
+                backgroundHeight = hotbarHeight;
+            }
+            if (hotbarExtensionTexture is null ||
+                hotbarExtensionTexture.Width != backgroundWidth ||
+                hotbarExtensionTexture.Height != backgroundHeight)
+            {
+                BakeHotbarExtensionTexture(capi, backgroundWidth, backgroundHeight);
+            }
+
+            if (hotbarExtensionTexture is not null && hotbarExtensionTexture.TextureId != 0)
+            {
+                capi.Render.Render2DTexture(
+                    hotbarExtensionTexture.TextureId,
+                    backgroundX,
+                    backgroundY,
+                    backgroundWidth,
+                    backgroundHeight,
+                    49f);
+            }
+        }
+        // The Open Hand cell at the anchor-resolved position.
         capi.Render.Render2DTexture(iconTexture.TextureId, x, y, size, size, 50f);
 
         // While selected, layer vanilla's own active slot highlight texture,
@@ -116,24 +194,248 @@ internal static class HudHotbarPatch
         }
     }
 
+    // Resolves the indicator cell position. Automatic placement always uses a
+    // safe external left panel; explicit left/right anchors follow the actual
+    // rendered row, while offhandGap remains an intentional legacy override.
+    private static (int X, int Y, bool DrawHotbarExtension, string Description) ResolvePlacement(object __instance, ElementBounds slotZero, int size)
+    {
+        int slotZeroX = (int)slotZero.renderX;
+        int slotZeroY = (int)slotZero.renderY;
+        int padding = (int)Math.Round(GuiElement.scaled(1.0));
+        int fallbackX = slotZeroX - size - padding;
+
+        // Left of slot 0 is today's fallback whenever the layout cannot be
+        // probed; explicit anchors degrade the same graceful way.
+        const string FallbackDescription = "left of slot 0 (row probe unavailable)";
+
+        switch (anchorMode)
+        {
+            case IconAnchorMode.Left:
+            {
+                bool haveRow = TryCollectRowIntervals(slotZeroY, size);
+                if (!haveRow)
+                {
+                    return (fallbackX, slotZeroY, false, FallbackDescription);
+                }
+
+                return (probeRowStart - size - padding, slotZeroY, false, $"left of row ({RowIntervals.Count} cells)");
+            }
+
+            case IconAnchorMode.Right:
+            {
+                bool haveRow = TryCollectRowIntervals(slotZeroY, size);
+                if (!haveRow)
+                {
+                    return (fallbackX, slotZeroY, false, FallbackDescription);
+                }
+
+                return (probeRowEnd + padding, slotZeroY, false, $"right of row ({RowIntervals.Count} cells)");
+            }
+
+            case IconAnchorMode.OffhandGap:
+            {
+                // Explicit choice: center the classic gap even if another mod's
+                // cell now shares it, and keep the historical fallback.
+                if (__instance is GuiDialog gapDialog &&
+                    TryGetOffhandGap(gapDialog, slotZeroX, out (int Start, int End) explicitGap))
+                {
+                    int x = explicitGap.Start + (explicitGap.End - explicitGap.Start - size) / 2 - padding;
+                    return (x, slotZeroY, false, "offhand gap");
+                }
+
+                return (fallbackX, slotZeroY, false, "left of slot 0 (offhand grid unavailable)");
+            }
+
+            default:
+            {
+                // The vanilla offhand gap is a reserved mission-skill
+                // location, so automatic placement must never occupy it.
+                // Always reserve an external panel left of the hotbar instead.
+                int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
+                if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
+                {
+                    int hotbarLeft = (int)hotbarBounds.renderX;
+                    int iconX = hotbarLeft - size - sidePadding;
+                    return (iconX, slotZeroY, true, $"left extension x={iconX} hotbar=[{hotbarLeft}..{hotbarLeft + hotbarBounds.OuterWidthInt}]");
+                }
+
+                // A missing composer must remain non-fatal.
+                return (fallbackX, slotZeroY, true, "left extension (hotbar bounds unavailable)");
+            }
+        }
+    }
+
+    // Gathers the X intervals of every slot rendered on slot 0's row across
+    // ALL composers of EVERY opened dialog, plus the merged row extents.
+    // Scanning every dialog (not just HudHotbar) matters: other mods render
+    // hotbar-row cells from their own dialogs or injected grids, and those
+    // cells constrain the placement exactly like vanilla slots do.
+    private static bool TryCollectRowIntervals(int slotZeroY, int size)
+    {
+        RowIntervals.Clear();
+        if (ComposerStaticElementsField is null || ComposerInteractiveElementsField is null)
+        {
+            LogProbeFailureOnce("element dictionaries");
+            return false;
+        }
+
+        ICoreClientAPI? capi = OpenHandModSystem.ClientApi;
+        if (capi is null)
+        {
+            return false;
+        }
+
+        foreach (GuiDialog dialog in capi.Gui.LoadedGuis)
+        {
+            // Hidden dialogs render nothing, so their cells constrain nothing.
+            if (!dialog.IsOpened())
+            {
+                continue;
+            }
+
+            foreach (GuiComposer composer in dialog.Composers.Values)
+            {
+                CollectRowIntervals(composer, ComposerStaticElementsField, slotZeroY, size);
+                CollectRowIntervals(composer, ComposerInteractiveElementsField, slotZeroY, size);
+            }
+        }
+
+        if (RowIntervals.Count == 0)
+        {
+            LogProbeFailureOnce("slot grids");
+            return false;
+        }
+
+        probeRowStart = int.MaxValue;
+        probeRowEnd = int.MinValue;
+        foreach ((int start, int end) in RowIntervals)
+        {
+            probeRowStart = Math.Min(probeRowStart, start);
+            probeRowEnd = Math.Max(probeRowEnd, end);
+        }
+
+        return true;
+    }
+
+    private static bool TryGetHotbarBounds(object instance, out ElementBounds bounds)
+    {
+        bounds = null!;
+        if (instance is not GuiDialog dialog ||
+            dialog.Composers["hotbar"]?.Bounds is not ElementBounds hotbarBounds ||
+            hotbarBounds.OuterWidthInt <= 0 ||
+            hotbarBounds.OuterHeightInt <= 0)
+        {
+            return false;
+        }
+
+        bounds = hotbarBounds;
+        return true;
+    }
+
+    private static void CollectRowIntervals(GuiComposer composer, FieldInfo elementsField, int slotZeroY, int size)
+    {
+        if (elementsField.GetValue(composer) is not Dictionary<string, GuiElement> elements)
+        {
+            return;
+        }
+
+        foreach (GuiElement element in elements.Values)
+        {
+            if (element is not GuiElementItemSlotGridBase grid ||
+                grid.SlotBounds is not { Length: > 0 } bounds)
+            {
+                continue;
+            }
+
+            foreach (ElementBounds bound in bounds)
+            {
+                // Cells on other rows (e.g. bag slots above the bar) do not
+                // constrain the horizontal placement.
+                if (bound is null || Math.Abs((int)bound.renderY - slotZeroY) > size / 2)
+                {
+                    continue;
+                }
+
+                RowIntervals.Add(((int)bound.renderX, (int)bound.renderX + bound.OuterWidthInt));
+            }
+        }
+    }
+
+    private static bool TryGetOffhandGap(GuiDialog dialog, int slotZeroX, out (int Start, int End) gap)
+    {
+        gap = default;
+        if (dialog.Composers["hotbar"]?.GetSlotGrid("offhandgrid") is not GuiElementItemSlotGridBase offhandGrid ||
+            offhandGrid.SlotBounds is not { Length: > 0 } offBounds ||
+            offBounds[0] is null)
+        {
+            return false;
+        }
+
+        ElementBounds offZero = offBounds[0];
+        int offhandRight = (int)offZero.renderX + offZero.OuterWidthInt;
+        if (offhandRight >= slotZeroX)
+        {
+            return false;
+        }
+
+        gap = (offhandRight, slotZeroX);
+        return true;
+    }
+
+    private static void LogProbeFailureOnce(string what)
+    {
+        if (loggedProbeFailure)
+        {
+            return;
+        }
+
+        loggedProbeFailure = true;
+        OpenHandModSystem.ClientApi?.Logger.Notification(
+            "Open Hand could not read the hotbar dialog's {0}; using the static left-of-slot-0 indicator position.",
+            what);
+    }
+
     // Resamples the 48x48 asset to the target size with bilinear filtering and
     // uploads it. Drawn 1:1 afterwards, so the GPU never scales the texture.
     private static void BakeIconTexture(ICoreClientAPI capi, int targetSize)
     {
-        IAsset? asset = capi.Assets.TryGet(IconLocation);
-        if (asset is null)
+        LoadedTexture? texture = BakeTexture(capi, IconLocation, targetSize, targetSize);
+        if (texture is null)
         {
             return;
+        }
+
+        iconTexture?.Dispose();
+        iconTexture = texture;
+    }
+
+    private static void BakeHotbarExtensionTexture(ICoreClientAPI capi, int targetWidth, int targetHeight)
+    {
+        LoadedTexture? texture = BakeTexture(capi, HotbarExtensionLocation, targetWidth, targetHeight);
+        if (texture is null)
+        {
+            return;
+        }
+
+        hotbarExtensionTexture?.Dispose();
+        hotbarExtensionTexture = texture;
+    }
+
+    private static LoadedTexture? BakeTexture(ICoreClientAPI capi, AssetLocation location, int targetWidth, int targetHeight)
+    {
+        IAsset? asset = capi.Assets.TryGet(location);
+        if (asset is null)
+        {
+            return null;
         }
 
         BitmapRef source = asset.ToBitmap(capi);
         try
         {
-            int[] pixels = UpscaleBilinear(source.Pixels, source.Width, source.Height, targetSize, targetSize);
-            LoadedTexture texture = new LoadedTexture(capi) { Width = targetSize, Height = targetSize };
+            int[] pixels = UpscaleBilinear(source.Pixels, source.Width, source.Height, targetWidth, targetHeight);
+            LoadedTexture texture = new LoadedTexture(capi) { Width = targetWidth, Height = targetHeight };
             capi.Render.LoadOrUpdateTextureFromRgba(pixels, linearMag: true, clampMode: 0, ref texture);
-            iconTexture?.Dispose();
-            iconTexture = texture;
+            return texture;
         }
         finally
         {
