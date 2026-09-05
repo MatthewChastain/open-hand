@@ -71,7 +71,9 @@ internal static class HudHotbarPatch
 
     internal static string DescribeIconPlacement()
     {
-        return $"{anchorMode.ToString().ToLowerInvariant()} offset=({config.IconOffsetX},{config.IconOffsetY}) | last render: {lastPlacementDescription}";
+        return $"indicator={(config.ShowIndicator ? "on" : "off")} " +
+            $"{anchorMode.ToString().ToLowerInvariant()} offset=({config.IconOffsetX},{config.IconOffsetY}) | " +
+            $"last render: {lastPlacementDescription}";
     }
 
     internal static MethodBase? TargetMethod()
@@ -116,7 +118,7 @@ internal static class HudHotbarPatch
         // overlaps its left edge; rendering in the postfix puts that overlap
         // above vanilla cells and their stack icons. The prefix lets vanilla
         // draw every existing hotbar element over the extension instead.
-        if (drawHotbarExtension)
+        if (config.ShowIndicator && drawHotbarExtension)
         {
             DrawHotbarExtension(capi, __instance, x, y, size);
         }
@@ -178,6 +180,10 @@ internal static class HudHotbarPatch
     }
     private static void Postfix(object __instance)
     {
+        if (!config.ShowIndicator)
+        {
+            return;
+        }
         ICoreClientAPI? capi = OpenHandModSystem.ClientApi;
         IClientPlayer? player = capi?.World?.Player;
         if (capi is null || player is null ||

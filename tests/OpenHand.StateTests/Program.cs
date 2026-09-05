@@ -160,6 +160,8 @@ Equal(IconAnchorMode.Auto, OpenHandClientConfig.ParseIconAnchor(null), "anchor n
 Equal(true, OpenHandClientConfig.IsKnownIconAnchor("offhandgap"), "known anchor");
 Equal(false, OpenHandClientConfig.IsKnownIconAnchor("nope"), "unknown anchor");
 Equal(false, OpenHandClientConfig.IsKnownIconAnchor(null), "null anchor");
+Equal(true, new OpenHandClientConfig().ShowIndicator, "indicator defaults on");
+Equal(false, new OpenHandClientConfig { ShowIndicator = false }.ShowIndicator, "indicator can be disabled");
 
 static void Gap(
     OpenHandGapSolver.GapChoice expectedChoice,

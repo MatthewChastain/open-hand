@@ -22,6 +22,13 @@ public sealed class OpenHandClientConfig
     /// <summary>Final pixel nudge applied after the anchor resolves.</summary>
     public int IconOffsetY { get; set; }
 
+    /// <summary>
+    /// Whether the client renders the Open Hand HUD panel, hand cell, and
+    /// selection outline. Selection behavior and server synchronization are
+    /// unaffected when this is disabled.
+    /// </summary>
+    public bool ShowIndicator { get; set; } = true;
+
     /// <summary>Parses the anchor setting; unknown values resolve to Auto.</summary>
     public static IconAnchorMode ParseIconAnchor(string? value)
     {

@@ -15,6 +15,7 @@ public sealed class OpenHandModSystem : ModSystem
     private Harmony? harmony;
     private OpenHandClientController? clientController;
     private OpenHandServerController? serverController;
+    private OpenHandClientConfig clientConfig = new();
 
     internal static ICoreClientAPI? ClientApi { get; private set; }
 
@@ -87,18 +88,18 @@ public sealed class OpenHandModSystem : ModSystem
     // Client-only config for the HUD indicator; never affects selection sync.
     private void ApplyClientConfig(ICoreClientAPI api)
     {
-        OpenHandClientConfig? clientConfig;
+        OpenHandClientConfig? loadedConfig;
         try
         {
-            clientConfig = api.LoadModConfig<OpenHandClientConfig>(OpenHandClientConfig.ConfigFileName);
+            loadedConfig = api.LoadModConfig<OpenHandClientConfig>(OpenHandClientConfig.ConfigFileName);
         }
         catch (Exception exception)
         {
             Mod.Logger.Error("Open Hand client config could not be parsed; using defaults: {0}", exception.Message);
-            clientConfig = null;
+            loadedConfig = null;
         }
 
-        clientConfig ??= new OpenHandClientConfig();
+        clientConfig = loadedConfig ?? new OpenHandClientConfig();
         IconAnchorMode anchorMode = OpenHandClientConfig.ParseIconAnchor(clientConfig.IconAnchor);
         if (!OpenHandClientConfig.IsKnownIconAnchor(clientConfig.IconAnchor))
         {
@@ -118,6 +119,29 @@ public sealed class OpenHandModSystem : ModSystem
         catch (Exception exception)
         {
             Mod.Logger.Error("Open Hand client config could not be saved: {0}", exception.Message);
+        }
+    }
+
+    private void SetIndicatorVisibility(ICoreClientAPI api, bool showIndicator)
+    {
+        clientConfig.ShowIndicator = showIndicator;
+        HudHotbarPatch.ApplyConfig(
+            clientConfig,
+            OpenHandClientConfig.ParseIconAnchor(clientConfig.IconAnchor));
+
+        try
+        {
+            api.StoreModConfig(clientConfig, OpenHandClientConfig.ConfigFileName);
+            api.ShowChatMessage(
+                $"Open Hand visual indicator is now {(showIndicator ? "on" : "off")}.");
+        }
+        catch (Exception exception)
+        {
+            Mod.Logger.Error(
+                "Open Hand client config could not be saved after changing indicator visibility: {0}",
+                exception.Message);
+            api.ShowChatMessage(
+                $"Open Hand visual indicator is now {(showIndicator ? "on" : "off")}, but the setting could not be saved.");
         }
     }
 
@@ -229,6 +253,33 @@ public sealed class OpenHandModSystem : ModSystem
                 api.ShowChatMessage(string.Join("\n", lines));
                 return TextCommandResult.Success("", "openhand-status");
             })
+            .EndSubCommand()
+            .BeginSubCommand("indicator")
+            .WithDescription("Controls the client-only Open Hand visual indicator")
+            .BeginSubCommand("on")
+            .WithDescription("Shows the Open Hand visual indicator")
+            .HandleWith(_ =>
+            {
+                SetIndicatorVisibility(api, true);
+                return TextCommandResult.Success("", "openhand-indicator-on");
+            })
+            .EndSubCommand()
+            .BeginSubCommand("off")
+            .WithDescription("Hides the Open Hand visual indicator")
+            .HandleWith(_ =>
+            {
+                SetIndicatorVisibility(api, false);
+                return TextCommandResult.Success("", "openhand-indicator-off");
+            })
+            .EndSubCommand()
+            .BeginSubCommand("toggle")
+            .WithDescription("Toggles the Open Hand visual indicator")
+            .HandleWith(_ =>
+            {
+                SetIndicatorVisibility(api, !clientConfig.ShowIndicator);
+                return TextCommandResult.Success("", "openhand-indicator-toggle");
+            })
+            .EndSubCommand()
             .EndSubCommand();
     }
 
