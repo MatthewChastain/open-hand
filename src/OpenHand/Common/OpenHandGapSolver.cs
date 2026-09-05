@@ -46,11 +46,10 @@ public static class OpenHandGapSolver
         int rowStart = merged[0].Start;
         int rowEnd = merged[^1].End;
 
-        // The preferred interval (the vanilla offhand↔slot-0 gap) wins while it
-        // is free: first when it actually fits the cell, otherwise - as the
-        // last resort - with the legacy centering that tolerates a narrow gap.
-        // This keeps pure-vanilla placement pixel-identical to the historical
-        // unconditional centering while modified rows prefer a roomier gap.
+        // The preferred interval (the vanilla offhand↔slot-0 gap) wins only
+        // when it is both free and wide enough for the entire indicator. A
+        // narrow gap is never a viable fallback: centering there necessarily
+        // overlaps an adjacent cell when another mod compresses the layout.
         bool preferredFree = preferred is (int prefStart, int prefEnd) &&
                              !OverlapsAny(merged, prefStart, prefEnd);
         if (preferredFree && preferred is (int fitStart, int fitEnd) && fitEnd - fitStart >= cellWidth)
@@ -77,10 +76,6 @@ public static class OpenHandGapSolver
             return new(GapChoice.Largest, bestStart + (bestLength - cellWidth) / 2, rowStart, rowEnd);
         }
 
-        if (preferredFree && preferred is (int narrowStart, int narrowEnd))
-        {
-            return new(GapChoice.Preferred, narrowStart + (narrowEnd - narrowStart - cellWidth) / 2, rowStart, rowEnd);
-        }
 
         return new(GapChoice.None, 0, rowStart, rowEnd);
     }

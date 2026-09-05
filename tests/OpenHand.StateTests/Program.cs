@@ -87,12 +87,12 @@ Gap(OpenHandGapSolver.GapChoice.Preferred, 57,
     preferred: (54, 114),
     name: "preferred gap fits");
 
-// Gap solver: tier 3 - a free but narrow preferred gap keeps the legacy
-// centering (the historical behavior for the vanilla offhand gap).
-Gap(OpenHandGapSolver.GapChoice.Preferred, 30,
+// Gap solver: a free but narrow preferred gap cannot fit the whole cell and
+// must stack instead of covering either neighboring cell.
+Gap(OpenHandGapSolver.GapChoice.None, 0,
     occupied: new List<(int, int)> { (0, 54), (60, 654) }, cellWidth: 54,
     preferred: (54, 60),
-    name: "narrow preferred gap keeps legacy centering");
+    name: "narrow preferred gap stacks");
 
 // Gap solver: tier 2 - another mod's cell squatting in the preferred gap
 // pushes the indicator to the largest remaining free gap.
