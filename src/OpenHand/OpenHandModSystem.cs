@@ -74,7 +74,7 @@ public sealed class OpenHandModSystem : ModSystem
             {
                 FailedPatches.Add(patchType.Name);
                 api.Logger.Error(
-                    "Open Hand skipped the {0} patch because its Vintage Story 1.22.7 target could not be applied: {1}",
+                    "Open Hand skipped the {0} patch because its Vintage Story target could not be applied: {1}",
                     patchType.Name,
                     exception);
             }
