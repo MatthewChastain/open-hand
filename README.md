@@ -45,3 +45,13 @@ Before relying on the mod in a save, test a fully populated hotbar and offhand i
 ## Compatibility
 
 Do not run alongside Forever Empty; both mods modify selected-hand behavior, and Open Hand warns about the conflict on startup. Mods that cache or alter `ActiveHotbarSlot` directly may need compatibility work — open an issue with a minimal reproduction and your Vintage Story version.
+
+## Contributing
+
+Bug reports and feature requests go to [GitHub issues](https://github.com/MatthewChastain/open-hand/issues) — use the templates and include your Vintage Story version, Open Hand version, and `/openhand status` output where relevant.
+
+Code changes go through pull requests into `develop`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow: build and test locally, target `develop`, and make sure the `state-tests` check is green.
+
+## License
+
+[MIT](LICENSE). By contributing you agree that your contributions are licensed under it.
