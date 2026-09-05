@@ -78,6 +78,9 @@ VAN_W, VAN_H = 850, 80  # vanilla hotbar backdrop
 # frame. These values apply only to the extension, never the vanilla export.
 EXTENSION_TONE = 0.92
 EXTENSION_BORDER_ALPHA = 0.70
+SHARP_OUTLINE_RGB = (0.0, 0.0, 0.0)
+SHARP_OUTLINE_ALPHA = 0.58
+SHARP_OUTLINE_WIDTH = 2.5
 
 
 def boxes_for_gauss(sigma: float, n: int = 3) -> list[int]:
@@ -207,6 +210,15 @@ def compose(w: int, h: int, open_right: bool = False) -> np.ndarray:
         rgb=tuple(c * tone for c in BORDER_RGB), alpha=border_alpha
     )
     base = over(base, border)
+    if open_right:
+        # The shaded dialog border is deliberately soft. A final unblurred
+        # dark edge gives the standalone panel the crisp perimeter of the
+        # vanilla slot frame without introducing a right-hand join seam.
+        sharp_outline = stroke_layer(
+            w, h, margin, expand=SHARP_OUTLINE_WIDTH / 2,
+            width=SHARP_OUTLINE_WIDTH, rgb=SHARP_OUTLINE_RGB,
+            alpha=SHARP_OUTLINE_ALPHA)
+        base = over(base, sharp_outline)
 
     if open_right:
         base = base[:, :w]
@@ -283,12 +295,36 @@ def report(arr: np.ndarray, label: str, column: int) -> None:
     print(f"  peak at row {peak} {tuple(int(v) for v in rgb[peak, column])}, "
           f"settles by row {settle}, interior base {tuple(int(v) for v in base)}")
 
+def sharpen_openhand_frame() -> None:
+    """Overlay vanilla's final crisp 4.5px / alpha-0.8 slot-frame stroke.
+
+    The hand glyph and soft background shading remain from the original art.
+    Keeping that art in a separate source file prevents repeated generation
+    from compounding the outline.
+    """
+    source = Image.open(ASSETS_SRC / "openhand-frame-base.png").convert("RGBA")
+    canvas = source.resize((source.width * SS, source.height * SS), Image.Resampling.NEAREST)
+    outline = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    half_width = 4.5 * SS / 2
+    ImageDraw.Draw(outline).rounded_rectangle(
+        (-half_width, -half_width,
+         canvas.width + half_width - 1, canvas.height + half_width - 1),
+        radius=SS,
+        outline=(0, 0, 0, int(0.8 * 255)),
+        width=int(round(4.5 * SS)),
+    )
+    canvas.alpha_composite(outline)
+    canvas.resize(source.size, Image.Resampling.LANCZOS).save(
+        REPO / "assets/openhand/textures/hud/openhand.png"
+    )
+
 
 def main() -> None:
     # --- extension panel: left end of a continuous bar, open right --------
     ext = compose(EXT_W, EXT_H, open_right=True)
     save_png(REPO / "assets/openhand/textures/hud/hotbar-extension.png", ext)
     save_png(ASSETS_SRC / "hotbar-extension-background.png", ext)
+    sharpen_openhand_frame()
 
     # --- vanilla bar ------------------------------------------------------
     van = compose(VAN_W, VAN_H)
@@ -323,6 +359,11 @@ def main() -> None:
             grain = grain_layer(w, h, margin, interior, grain_offset, tone)
             border = stroke_layer(
                 w, h, margin, 2.5, 5.0, tuple(c * tone for c in BORDER_RGB), border_alpha)
+            if open_right:
+                sharp_outline = stroke_layer(
+                    w, h, margin, SHARP_OUTLINE_WIDTH / 2, SHARP_OUTLINE_WIDTH,
+                    SHARP_OUTLINE_RGB, SHARP_OUTLINE_ALPHA)
+                border = over(border, sharp_outline)
             layers = layer_pngs(bottom, grain, interior, border, tmp, prefix)
             if open_right:
                 layers = []

@@ -104,7 +104,7 @@ internal static class HudHotbarPatch
         ElementBounds slotZero = slotBounds[0];
         int size = slotZero.OuterWidthInt;
         (int x, int y, bool drawHotbarExtension, string placementDescription) =
-            ResolvePlacement(__instance, grid, slotZero, size);
+            ResolvePlacement(__instance, slotZero, size);
         x += config.IconOffsetX;
         y += config.IconOffsetY;
         lastPlacementDescription = placementDescription;
@@ -145,6 +145,13 @@ internal static class HudHotbarPatch
             backgroundRight = Math.Max(
                 backgroundRight,
                 (int)hotbarBounds.renderX + joinOverlap);
+        }
+        if (instance is GuiDialog dialog &&
+            TryGetOffhandBounds(dialog, out ElementBounds offhandBounds))
+        {
+            // The extension may fill the normal gap before offhand, but never
+            // lies underneath offhand's own background or item stack.
+            backgroundRight = Math.Min(backgroundRight, (int)offhandBounds.renderX);
         }
 
         int backgroundWidth = Math.Max(1, backgroundRight - backgroundX);
@@ -187,7 +194,7 @@ internal static class HudHotbarPatch
         // external left panel so it cannot obstruct the vanilla reserved
         // mission-skill gap; explicit left/right anchors probe the row.
         int size = slotZero.OuterWidthInt;
-        (int x, int y, _, string placementDescription) = ResolvePlacement(__instance, grid, slotZero, size);
+        (int x, int y, _, string placementDescription) = ResolvePlacement(__instance, slotZero, size);
         x += config.IconOffsetX;
         y += config.IconOffsetY;
         lastPlacementDescription = placementDescription;
@@ -227,7 +234,6 @@ internal static class HudHotbarPatch
     // rendered row, while offhandGap remains an intentional legacy override.
     private static (int X, int Y, bool DrawHotbarExtension, string Description) ResolvePlacement(
         object __instance,
-        GuiElementItemSlotGridBase hotbarGrid,
         ElementBounds slotZero,
         int size)
     {
@@ -287,7 +293,7 @@ internal static class HudHotbarPatch
                 if (__instance is GuiDialog dialog &&
                     TryGetOffhandBounds(dialog, out ElementBounds offhandBounds))
                 {
-                    int gutter = GetStandardCellGutter(hotbarGrid, size);
+                    int gutter = GetStandardCellGutter();
                     int iconX = (int)offhandBounds.renderX - size - gutter;
                     return (iconX, slotZeroY, true, $"left extension, offhand gutter={gutter}px");
                 }
@@ -364,23 +370,16 @@ internal static class HudHotbarPatch
         return true;
     }
 
-    private static int GetStandardCellGutter(GuiElementItemSlotGridBase hotbarGrid, int size)
+    private static int GetStandardCellGutter()
     {
-        if (hotbarGrid.SlotBounds is { Length: > 1 } slotBounds &&
-            slotBounds[0] is not null &&
-            slotBounds[1] is not null)
-        {
-            int gutter = (int)slotBounds[1].renderX -
-                ((int)slotBounds[0].renderX + slotBounds[0].OuterWidthInt);
-            if (gutter >= 0)
-            {
-                return gutter;
-            }
-        }
-
-        // The hotbar grid was unavailable or unexpected; retain a compact,
-        // scaled fallback rather than obscuring the offhand cell.
-        return Math.Max(1, (int)Math.Round(GuiElement.scaled(3.0)));
+        // Vanilla's rendered grid increments each cell by its 48px frame plus
+        // GuiElementItemSlotGridBase.unscaledSlotPadding (3px). SlotBounds'
+        // OuterWidth includes unrelated outer padding in this layout, so
+        // deriving the gutter from it made the indicator gap too wide.
+        return Math.Max(
+            1,
+            (int)Math.Round(
+                GuiElement.scaled(GuiElementItemSlotGridBase.unscaledSlotPadding)));
     }
 
     private static bool TryGetHotbarBounds(object instance, out ElementBounds bounds)
