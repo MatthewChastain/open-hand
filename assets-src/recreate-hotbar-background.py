@@ -314,9 +314,9 @@ def rebuild_openhand_slot() -> None:
     glyph_alpha[:, :4] = 0
     glyph_alpha[:, -4:] = 0
     glyph = np.dstack([original[..., :3], glyph_alpha])
+    save_png(REPO / "assets/openhand/textures/hud/openhand-glyph.png", glyph)
     result = over(frame, glyph)
     save_png(ASSETS_SRC / "openhand-slot-rebuilt.png", result)
-    save_png(REPO / "assets/openhand/textures/hud/openhand.png", result)
 
 
 def main() -> None:

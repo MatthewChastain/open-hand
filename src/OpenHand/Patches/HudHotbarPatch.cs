@@ -1,4 +1,5 @@
 using System.Reflection;
+using Cairo;
 using HarmonyLib;
 using OpenHand.Common;
 using Vintagestory.API.Client;
@@ -32,16 +33,16 @@ internal static class HudHotbarPatch
     private static readonly FieldInfo? ComposerInteractiveElementsField =
         AccessTools.Field("Vintagestory.API.Client.GuiComposer:interactiveElements");
 
-    private static readonly AssetLocation IconLocation =
-        new AssetLocation("openhand", "textures/hud/openhand.png");
-    private static readonly AssetLocation HotbarExtensionLocation =
-        new AssetLocation("openhand", "textures/hud/hotbar-extension.png");
+    private static readonly AssetLocation IconGlyphLocation =
+        new AssetLocation("openhand", "textures/hud/openhand-glyph.png");
+    private static readonly AssetLocation SoilTextureLocation =
+        new AssetLocation("game", "gui/backgrounds/soil.png");
 
-    // The icon texture is baked at the CURRENT scaled slot size (high quality
-    // resample from the 48x48 asset) and drawn 1:1, so the GPU never scales
-    // the texture. Re-baked whenever the slot size changes (GUI scale) or the
-    // GL texture is invalidated (world transitions, texture reloads).
-    private static LoadedTexture? iconTexture;
+    // The frame is composed on a fresh Cairo surface at the CURRENT scaled
+    // slot size, precisely as vanilla does. The hand glyph alone is resampled,
+    // so interpolation can never soften the final crisp frame stroke.
+    private static LoadedTexture? iconFrameTexture;
+    private static LoadedTexture? iconGlyphTexture;
     private static LoadedTexture? hotbarExtensionTexture;
 
     // Client config (openhand.json); defaults until StartClientSide loads the
@@ -84,8 +85,10 @@ internal static class HudHotbarPatch
     // reuses the handle for (e.g. the handbook close button).
     internal static void ResetIconTexture()
     {
-        iconTexture?.Dispose();
-        iconTexture = null;
+        iconFrameTexture?.Dispose();
+        iconFrameTexture = null;
+        iconGlyphTexture?.Dispose();
+        iconGlyphTexture = null;
         hotbarExtensionTexture?.Dispose();
         hotbarExtensionTexture = null;
     }
@@ -199,18 +202,22 @@ internal static class HudHotbarPatch
         y += config.IconOffsetY;
         lastPlacementDescription = placementDescription;
 
-        // Re-bake when the icon texture is missing or the slot size changed.
-        if (iconTexture is null || iconTexture.Width != size)
+        // Re-bake both the direct-composed frame and glyph when the slot size
+        // changes. The frame's crisp final stroke is never resampled.
+        if (iconFrameTexture is null || iconFrameTexture.Width != size ||
+            iconGlyphTexture is null || iconGlyphTexture.Width != size)
         {
-            BakeIconTexture(capi, size);
-            if (iconTexture is null || iconTexture.TextureId == 0)
+            BakeIconTextures(capi, size);
+            if (iconFrameTexture is null || iconFrameTexture.TextureId == 0 ||
+                iconGlyphTexture is null || iconGlyphTexture.TextureId == 0)
             {
                 return;
             }
         }
 
-        // The Open Hand cell at the anchor-resolved position.
-        capi.Render.Render2DTexture(iconTexture.TextureId, x, y, size, size, 50f);
+        // The Open Hand frame and glyph at the anchor-resolved position.
+        capi.Render.Render2DTexture(iconFrameTexture.TextureId, x, y, size, size, 50f);
+        capi.Render.Render2DTexture(iconGlyphTexture.TextureId, x, y, size, size, 51f);
 
         // While selected, layer vanilla's own active slot highlight texture,
         // drawn exactly the way the slot grid draws it (2px overscan, z 50).
@@ -457,30 +464,117 @@ internal static class HudHotbarPatch
             what);
     }
 
-    // Resamples the 48x48 asset to the target size with bilinear filtering and
-    // uploads it. Drawn 1:1 afterwards, so the GPU never scales the texture.
-    private static void BakeIconTexture(ICoreClientAPI capi, int targetSize)
+    // Exact transcription of GuiElementItemSlotGridBase.ComposeInteractiveElements:
+    // draw at this GUI scale, blur the wood rim twice, then draw the unblurred
+    // black final frame. This intentionally does not use a scaled slot PNG.
+    private static void BakeIconTextures(ICoreClientAPI capi, int targetSize)
     {
-        LoadedTexture? texture = BakeTexture(capi, IconLocation, targetSize, targetSize);
-        if (texture is null)
+        LoadedTexture? glyphTexture = BakeTexture(capi, IconGlyphLocation, targetSize, targetSize);
+        if (glyphTexture is null)
         {
             return;
         }
 
-        iconTexture?.Dispose();
-        iconTexture = texture;
+        LoadedTexture frameTexture = capi.Gui.Icons.GenTexture(targetSize, targetSize, (ctx, surface) =>
+        {
+            double slotSize = GuiElement.scaled(GuiElementPassiveItemSlot.unscaledSlotSize);
+            double frameWidth = GuiElement.scaled(4.5);
+            double blurRange = GuiElement.scaled(4.0);
+
+            ctx.SetSourceRGBA(GuiStyle.DialogSlotBackColor);
+            GuiElement.RoundRectangle(ctx, 0, 0, slotSize, slotSize, GuiStyle.ElementBGRadius);
+            ctx.Fill();
+
+            ctx.SetSourceRGBA(GuiStyle.DialogSlotFrontColor);
+            GuiElement.RoundRectangle(ctx, 0, 0, slotSize, slotSize, GuiStyle.ElementBGRadius);
+            ctx.LineWidth = frameWidth;
+            ctx.Stroke();
+            surface.BlurFull(blurRange);
+            surface.BlurFull(blurRange);
+
+            GuiElement.RoundRectangle(ctx, 0, 0, slotSize, slotSize, 1);
+            ctx.LineWidth = frameWidth;
+            ctx.SetSourceRGBA(0, 0, 0, 0.8);
+            ctx.Stroke();
+        });
+
+        iconFrameTexture?.Dispose();
+        iconFrameTexture = frameTexture;
+        iconGlyphTexture?.Dispose();
+        iconGlyphTexture = glyphTexture;
     }
 
     private static void BakeHotbarExtensionTexture(ICoreClientAPI capi, int targetWidth, int targetHeight)
     {
-        LoadedTexture? texture = BakeTexture(capi, HotbarExtensionLocation, targetWidth, targetHeight);
-        if (texture is null)
-        {
-            return;
-        }
+        LoadedTexture texture = ComposeHotbarExtensionTexture(capi, targetWidth, targetHeight);
 
         hotbarExtensionTexture?.Dispose();
         hotbarExtensionTexture = texture;
+    }
+
+    // Direct transcription of GuiElementDialogBackground.ComposeElements.
+    // Compose beyond the requested right edge and crop, leaving that edge
+    // borderless so it merges into the existing bar without a double seam.
+    private static LoadedTexture ComposeHotbarExtensionTexture(
+        ICoreClientAPI capi,
+        int targetWidth,
+        int targetHeight)
+    {
+        int cropMargin = Math.Max(1, (int)Math.Ceiling(GuiElement.scaled(24.0)));
+        using ImageSurface source = new(
+            Format.Argb32,
+            targetWidth + cropMargin,
+            targetHeight);
+        using Context sourceContext = new(source);
+
+        double sourceWidth = source.Width;
+        double sourceHeight = source.Height;
+        double strokeWidth = GuiElement.scaled(5.0);
+        GuiElement.RoundRectangle(
+            sourceContext,
+            0,
+            0,
+            sourceWidth,
+            sourceHeight - 1,
+            GuiStyle.DialogBGRadius);
+        sourceContext.SetSourceRGBA(GuiStyle.DialogStrongBgColor);
+        sourceContext.FillPreserve();
+
+        sourceContext.SetSourceRGBA(
+            GuiStyle.DialogLightBgColor[0] * 2.1,
+            GuiStyle.DialogStrongBgColor[1] * 2.1,
+            GuiStyle.DialogStrongBgColor[2] * 2.1,
+            1);
+        sourceContext.LineWidth = strokeWidth * 2;
+        sourceContext.StrokePreserve();
+        source.BlurFull(GuiElement.scaled(9.0));
+
+        SurfacePattern soilPattern = GuiElement.getPattern(
+            capi,
+            SoilTextureLocation,
+            true,
+            64,
+            0.125f);
+        sourceContext.SetSource(soilPattern);
+        sourceContext.FillPreserve();
+        sourceContext.Operator = Operator.Over;
+
+        sourceContext.SetSourceRGBA(45 / 255.0, 35 / 255.0, 33 / 255.0, 0.75 * 0.75);
+        sourceContext.LineWidth = strokeWidth;
+        sourceContext.Stroke();
+
+        using ImageSurface cropped = new(Format.Argb32, targetWidth, targetHeight);
+        using Context croppedContext = new(cropped);
+        croppedContext.SetSourceSurface(source, 0, 0);
+        croppedContext.Paint();
+
+        int textureId = capi.Gui.LoadCairoTexture(cropped, true);
+        return new LoadedTexture(capi)
+        {
+            TextureId = textureId,
+            Width = targetWidth,
+            Height = targetHeight,
+        };
     }
 
     private static LoadedTexture? BakeTexture(ICoreClientAPI capi, AssetLocation location, int targetWidth, int targetHeight)
