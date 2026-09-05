@@ -5,29 +5,21 @@
     <Version>0.2.1</Version>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
   </PropertyGroup>
-  <PropertyGroup>
-    <!-- Vendored 1.22.7 reference DLLs; falls back to a local game install. -->
-    <LibDir>$(MSBuildThisFileDirectory)../../lib/</LibDir>
-  </PropertyGroup>
   <ItemGroup>
     <Reference Include="VintagestoryAPI">
-      <HintPath Condition="Exists('$(LibDir)VintagestoryAPI.dll')">$(LibDir)VintagestoryAPI.dll</HintPath>
-      <HintPath Condition="!Exists('$(LibDir)VintagestoryAPI.dll')">$(VintageStoryPath)/VintagestoryAPI.dll</HintPath>
+      <HintPath>$(VintageStoryPath)/VintagestoryAPI.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="0Harmony">
-      <HintPath Condition="Exists('$(LibDir)0Harmony.dll')">$(LibDir)0Harmony.dll</HintPath>
-      <HintPath Condition="!Exists('$(LibDir)0Harmony.dll')">$(VintageStoryPath)/Lib/0Harmony.dll</HintPath>
+      <HintPath>$(VintageStoryPath)/Lib/0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="cairo-sharp">
-      <HintPath Condition="Exists('$(LibDir)cairo-sharp.dll')">$(LibDir)cairo-sharp.dll</HintPath>
-      <HintPath Condition="!Exists('$(LibDir)cairo-sharp.dll')">$(VintageStoryPath)/Lib/cairo-sharp.dll</HintPath>
+      <HintPath>$(VintageStoryPath)/Lib/cairo-sharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="protobuf-net">
-      <HintPath Condition="Exists('$(LibDir)protobuf-net.dll')">$(LibDir)protobuf-net.dll</HintPath>
-      <HintPath Condition="!Exists('$(LibDir)protobuf-net.dll')">$(VintageStoryPath)/Lib/protobuf-net.dll</HintPath>
+      <HintPath>$(VintageStoryPath)/Lib/protobuf-net.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

@@ -15,9 +15,3 @@ jobs:
       - run: dotnet run --project tests/OpenHand.StateTests/OpenHand.StateTests.csproj -c Release
       - run: python3 -m json.tool src/OpenHand/modinfo.json > /dev/null
 
-  game-build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: dotnet build OpenHand.sln -c Release
-      - run: python3 scripts/package.py

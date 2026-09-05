@@ -26,19 +26,3 @@ jobs:
             exit 1
           fi
 
-  # Builds the full mod against the vendored lib DLLs and attaches the zip to
-  # the GitHub release for the tag. The tag must match the modinfo version.
-  build-and-release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: dotnet build OpenHand.sln -c Release
-      - run: dotnet run --project tests/OpenHand.StateTests/OpenHand.StateTests.csproj -c Release
-      - run: python3 scripts/package.py
-      - name: Create or update the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" --generate-notes || true
-          gh release upload "$GITHUB_REF_NAME" artifacts/openhand_*.zip --clobber
