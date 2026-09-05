@@ -34,12 +34,15 @@ internal static class HudHotbarPatch
 
     private static readonly AssetLocation IconLocation =
         new AssetLocation("openhand", "textures/hud/openhand.png");
+    private static readonly AssetLocation HotbarExtensionLocation =
+        new AssetLocation("openhand", "textures/hud/hotbar-extension.png");
 
     // The icon texture is baked at the CURRENT scaled slot size (high quality
     // resample from the 48x48 asset) and drawn 1:1, so the GPU never scales
     // the texture. Re-baked whenever the slot size changes (GUI scale) or the
     // GL texture is invalidated (world transitions, texture reloads).
     private static LoadedTexture? iconTexture;
+    private static LoadedTexture? hotbarExtensionTexture;
 
     // Client config (openhand.json); defaults until StartClientSide loads the
     // real file. Client-only by definition, mirroring the ClientApi singleton.
@@ -83,6 +86,8 @@ internal static class HudHotbarPatch
     {
         iconTexture?.Dispose();
         iconTexture = null;
+        hotbarExtensionTexture?.Dispose();
+        hotbarExtensionTexture = null;
     }
 
     private static void Prefix(object __instance)
@@ -115,7 +120,7 @@ internal static class HudHotbarPatch
         // actual layout each frame so other mods that add or move hotbar cells
         // keep the icon aligned without any per-mod special-casing.
         int size = slotZero.OuterWidthInt;
-        (int x, int y, string placementDescription) = ResolvePlacement(__instance, slotZero, size);
+        (int x, int y, bool drawHotbarExtension, string placementDescription) = ResolvePlacement(__instance, slotZero, size);
         x += config.IconOffsetX;
         y += config.IconOffsetY;
         lastPlacementDescription = placementDescription;
@@ -130,6 +135,31 @@ internal static class HudHotbarPatch
             }
         }
 
+        if (drawHotbarExtension)
+        {
+            int frameSize = Math.Max(1, (int)Math.Round(GuiElement.scaled(3.0)));
+            int backgroundX = x - frameSize;
+            int backgroundY = y - frameSize;
+            int backgroundWidth = size + frameSize * 2;
+            int backgroundHeight = size + frameSize * 2;
+            if (hotbarExtensionTexture is null ||
+                hotbarExtensionTexture.Width != backgroundWidth ||
+                hotbarExtensionTexture.Height != backgroundHeight)
+            {
+                BakeHotbarExtensionTexture(capi, backgroundWidth, backgroundHeight);
+            }
+
+            if (hotbarExtensionTexture is not null && hotbarExtensionTexture.TextureId != 0)
+            {
+                capi.Render.Render2DTexture(
+                    hotbarExtensionTexture.TextureId,
+                    backgroundX,
+                    backgroundY,
+                    backgroundWidth,
+                    backgroundHeight,
+                    49f);
+            }
+        }
         // The Open Hand cell at the anchor-resolved position.
         capi.Render.Render2DTexture(iconTexture.TextureId, x, y, size, size, 50f);
 
@@ -154,7 +184,7 @@ internal static class HudHotbarPatch
     // rendered layout. In vanilla this reproduces the original offhand-gap
     // centering exactly; when other mods add or move row cells, the same math
     // follows the new layout instead of assuming vanilla geometry.
-    private static (int X, int Y, string Description) ResolvePlacement(object __instance, ElementBounds slotZero, int size)
+    private static (int X, int Y, bool DrawHotbarExtension, string Description) ResolvePlacement(object __instance, ElementBounds slotZero, int size)
     {
         int slotZeroX = (int)slotZero.renderX;
         int slotZeroY = (int)slotZero.renderY;
@@ -172,20 +202,20 @@ internal static class HudHotbarPatch
             {
                 if (!haveRow)
                 {
-                    return (fallbackX, slotZeroY, FallbackDescription);
+                    return (fallbackX, slotZeroY, false, FallbackDescription);
                 }
 
-                return (probeRowStart - size - padding, slotZeroY, $"left of row ({RowIntervals.Count} cells)");
+                return (probeRowStart - size - padding, slotZeroY, false, $"left of row ({RowIntervals.Count} cells)");
             }
 
             case IconAnchorMode.Right:
             {
                 if (!haveRow)
                 {
-                    return (fallbackX, slotZeroY, FallbackDescription);
+                    return (fallbackX, slotZeroY, false, FallbackDescription);
                 }
 
-                return (probeRowEnd + padding, slotZeroY, $"right of row ({RowIntervals.Count} cells)");
+                return (probeRowEnd + padding, slotZeroY, false, $"right of row ({RowIntervals.Count} cells)");
             }
 
             case IconAnchorMode.OffhandGap:
@@ -196,17 +226,17 @@ internal static class HudHotbarPatch
                     TryGetOffhandGap(gapDialog, slotZeroX, out (int Start, int End) explicitGap))
                 {
                     int x = explicitGap.Start + (explicitGap.End - explicitGap.Start - size) / 2 - padding;
-                    return (x, slotZeroY, "offhand gap");
+                    return (x, slotZeroY, false, "offhand gap");
                 }
 
-                return (fallbackX, slotZeroY, "left of slot 0 (offhand grid unavailable)");
+                return (fallbackX, slotZeroY, false, "left of slot 0 (offhand grid unavailable)");
             }
 
             default:
             {
                 if (!haveRow)
                 {
-                    return (fallbackX, slotZeroY, FallbackDescription);
+                    return (fallbackX, slotZeroY, false, FallbackDescription);
                 }
 
                 (int, int)? preferred = __instance is GuiDialog autoDialog &&
@@ -219,13 +249,13 @@ internal static class HudHotbarPatch
                     case OpenHandGapSolver.GapChoice.Preferred:
                     {
                         int x = placement.X - padding;
-                        return (x, slotZeroY, $"preferred gap x={x} row=[{placement.RowStart}..{placement.RowEnd}] ({RowIntervals.Count} cells)");
+                        return (x, slotZeroY, false, $"preferred gap x={x} row=[{placement.RowStart}..{placement.RowEnd}] ({RowIntervals.Count} cells)");
                     }
 
                     case OpenHandGapSolver.GapChoice.Largest:
                     {
                         int x = placement.X - padding;
-                        return (x, slotZeroY, $"largest gap x={x} row=[{placement.RowStart}..{placement.RowEnd}] ({RowIntervals.Count} cells)");
+                        return (x, slotZeroY, false, $"largest gap x={x} row=[{placement.RowStart}..{placement.RowEnd}] ({RowIntervals.Count} cells)");
                     }
 
                     default:
@@ -236,7 +266,7 @@ internal static class HudHotbarPatch
                         // Keep one vanilla-sized gutter so its dark border
                         // reads as another hotbar cell, not an overlap.
                         int extensionX = placement.RowStart - size - padding;
-                        return (extensionX, slotZeroY, $"left extension x={extensionX} (no free gap; {RowIntervals.Count} cells)");
+                        return (extensionX, slotZeroY, true, $"left extension x={extensionX} (no free gap; {RowIntervals.Count} cells)");
                     }
                 }
             }
@@ -362,20 +392,43 @@ internal static class HudHotbarPatch
     // uploads it. Drawn 1:1 afterwards, so the GPU never scales the texture.
     private static void BakeIconTexture(ICoreClientAPI capi, int targetSize)
     {
-        IAsset? asset = capi.Assets.TryGet(IconLocation);
-        if (asset is null)
+        LoadedTexture? texture = BakeTexture(capi, IconLocation, targetSize, targetSize);
+        if (texture is null)
         {
             return;
+        }
+
+        iconTexture?.Dispose();
+        iconTexture = texture;
+    }
+
+    private static void BakeHotbarExtensionTexture(ICoreClientAPI capi, int targetWidth, int targetHeight)
+    {
+        LoadedTexture? texture = BakeTexture(capi, HotbarExtensionLocation, targetWidth, targetHeight);
+        if (texture is null)
+        {
+            return;
+        }
+
+        hotbarExtensionTexture?.Dispose();
+        hotbarExtensionTexture = texture;
+    }
+
+    private static LoadedTexture? BakeTexture(ICoreClientAPI capi, AssetLocation location, int targetWidth, int targetHeight)
+    {
+        IAsset? asset = capi.Assets.TryGet(location);
+        if (asset is null)
+        {
+            return null;
         }
 
         BitmapRef source = asset.ToBitmap(capi);
         try
         {
-            int[] pixels = UpscaleBilinear(source.Pixels, source.Width, source.Height, targetSize, targetSize);
-            LoadedTexture texture = new LoadedTexture(capi) { Width = targetSize, Height = targetSize };
+            int[] pixels = UpscaleBilinear(source.Pixels, source.Width, source.Height, targetWidth, targetHeight);
+            LoadedTexture texture = new LoadedTexture(capi) { Width = targetWidth, Height = targetHeight };
             capi.Render.LoadOrUpdateTextureFromRgba(pixels, linearMag: true, clampMode: 0, ref texture);
-            iconTexture?.Dispose();
-            iconTexture = texture;
+            return texture;
         }
         finally
         {
