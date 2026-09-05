@@ -2,7 +2,7 @@
 
 An always-empty hand option for the discerning adventurer.
 
-Adds a virtual, always-empty main-hand selection to Vintage Story. It is not an inventory slot: it cannot be filled, moved, saved, crafted into, or targeted by inventory automation. Current release: [v0.2.0](https://github.com/MatthewChastain/open-hand/releases/latest) — install on both the client and the server.
+Adds a virtual, always-empty main-hand selection to Vintage Story. It is not an inventory slot: it cannot be filled, moved, saved, crafted into, or targeted by inventory automation. Install on both the client and the server — grab the latest release from the [releases page](https://github.com/MatthewChastain/open-hand/releases/latest).
 
 ## Supported versions
 
@@ -24,7 +24,7 @@ While Open Hand is selected the engine resolves the main hand as empty. The ten 
 - `main` is the stable release branch and the default on GitHub. Changes land here only via pull request from `develop`, gated on the CI `state-tests` check.
 - `develop` is the main working branch; direct pushes are allowed.
 - To release: bump `version` in `src/OpenHand/modinfo.json` (and the csproj), merge `develop` into `main`, then tag `v<version>` and push the tag. The Release workflow builds and attaches the zip to the GitHub release automatically.
-- After switching the repository to public, run `bash scripts/setup-branch-protection.sh` once to enforce the branch rules (GitHub requires the repo to be public, or Pro, for branch protection).
+- Branch protection is enforced: pull requests into `main` with a green `state-tests` check, no force pushes or deletions on either branch. Re-apply or adjust with `bash scripts/setup-branch-protection.sh`.
 
 ## Build
 
