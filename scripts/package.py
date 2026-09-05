@@ -13,7 +13,9 @@ version = sys.argv[1] if len(sys.argv) > 1 else modinfo["version"]
 build = root / "src" / "OpenHand" / "bin" / "Release" / "net10.0"
 archive = root / "artifacts" / f"openhand_{version}.zip"
 
-required = [build / "OpenHand.dll", build / "modinfo.json"]
+# The source modinfo.json is authoritative: the build output copy can go stale
+# because dotnet build does not recopy it when only the source file changes.
+required = [build / "OpenHand.dll", root / "src" / "OpenHand" / "modinfo.json"]
 missing = [path for path in required if not path.is_file()]
 if missing:
     raise SystemExit(f"Build first; missing: {', '.join(str(path) for path in missing)}")
@@ -28,6 +30,7 @@ def write_entry(output, path, archive_path):
 
 entries = []
 for path in required + [build / "OpenHand.pdb", root / "src" / "OpenHand" / "modicon.png"]:
+    # modinfo.json is already listed via `required` from its source location.
     if path.is_file():
         entries.append((path, path.name))
 # Ship binaries plus game assets: the game compiles any .cs files found in a
