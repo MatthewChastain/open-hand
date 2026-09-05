@@ -3,14 +3,14 @@
   "modid": "openhand",
   "name": "Open Hand",
   "description": "An always-empty hand option for the discerning adventurer.",
-  "authors": ["Matthew Chastain"],
-  "version": "0.2.2",
+  "authors": ["TheAzyrian"],
+  "version": "0.2.3",
   "networkVersion": "1",
   "side": "universal",
   "requiredOnClient": true,
   "requiredOnServer": true,
   "dependencies": {
-    "game": "1.22.7"
+    "game": "1.22.0"
   },
   "website": "https://github.com/MatthewChastain/open-hand"
 }

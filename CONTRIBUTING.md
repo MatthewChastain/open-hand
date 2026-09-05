@@ -33,7 +33,7 @@ Changes that alter player-facing behavior should be validated in-game (single-pl
 
 ### Version compatibility
 
-Open Hand targets the exact Vintage Story 1.22.7 API, and the Harmony patches are verified against decompiled 1.22.7 assemblies. Changes that alter patch targets or game-version assumptions should include the decompile evidence that supports them.
+Open Hand targets the Vintage Story 1.22 API and supports the whole 1.22.x line (minimum 1.22.0); the Harmony patches are verified against decompiled 1.22.7 assemblies. Changes that alter patch targets or game-version assumptions should include the decompile evidence that supports them.
 
 ## Reporting a bug with multiplayer
 

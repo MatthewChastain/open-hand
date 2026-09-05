@@ -6,7 +6,7 @@ Adds a virtual, always-empty main-hand selection to Vintage Story. It is not an 
 
 ## Supported versions
 
-Built and tested against Vintage Story **1.22.7**, and the packaged mod declares that game version as a dependency. The Harmony patches target internal APIs verified against the decompiled 1.22.7 assemblies, so newer game versions may not work until the mod is re-verified — each release's notes state the supported game version.
+Built and tested against Vintage Story **1.22.7**, and the packaged mod declares the 1.22 line as a dependency (minimum 1.22.0). The Harmony patches target internal APIs verified against the decompiled 1.22.7 assemblies; the game API is stable across 1.22.x revisions, so any 1.22 release should work. Newer game versions may not work until the mod is re-verified — each release's notes state the supported game version.
 
 ## Controls
 
@@ -28,7 +28,7 @@ While Open Hand is selected the engine resolves the main hand as empty. The ten 
 
 ## Build
 
-Building requires a local Vintage Story 1.22.7 installation — the project compiles against the game's own DLLs. Point the build at your install with `VINTAGE_STORY` (or an ignored `Local.props` that sets `VintageStoryPath`).
+Building requires a local Vintage Story 1.22.x installation — the project compiles against the game's own DLLs. Point the build at your install with `VINTAGE_STORY` (or an ignored `Local.props` that sets `VintageStoryPath`).
 
 ```bash
 dotnet build OpenHand.sln -c Release
