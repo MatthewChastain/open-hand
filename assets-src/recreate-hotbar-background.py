@@ -71,6 +71,13 @@ EXT_BASE_W = 64  # 48px slot + 2 * 8px padding
 JOIN_OVERLAP = 24  # covers the vanilla left-edge blur tail (~24px)
 EXT_W, EXT_H = EXT_BASE_W + JOIN_OVERLAP, 80
 VAN_W, VAN_H = 850, 80  # vanilla hotbar backdrop
+# The standalone panel is rendered over the scene rather than against the
+# hotbar's already-darkened compose surface. The in-game comparison needs a
+# modestly deeper treatment to match the perceived vanilla bar: retain all
+# vanilla hue ratios, reduce its RGB energy by 8%, and restore a firmer outer
+# frame. These values apply only to the extension, never the vanilla export.
+EXTENSION_TONE = 0.92
+EXTENSION_BORDER_ALPHA = 0.70
 
 
 def boxes_for_gauss(sigma: float, n: int = 3) -> list[int]:
@@ -118,7 +125,7 @@ def _downsample(img: Image.Image, w: int, h: int) -> np.ndarray:
     return np.asarray(img, dtype=np.float64) / 255.0
 
 
-def fill_layer(w: int, h: int, margin: int) -> np.ndarray:
+def fill_layer(w: int, h: int, margin: int, rgb: tuple = BASE_RGB) -> np.ndarray:
     """Opaque rounded-rect fill: path (0,0)-(w+margin, h-1), radius 1."""
     ss = SS
     img = Image.new("RGBA", ((w + margin) * ss, h * ss), (0, 0, 0, 0))
@@ -126,7 +133,7 @@ def fill_layer(w: int, h: int, margin: int) -> np.ndarray:
     draw.rounded_rectangle(
         (0, 0, (w + margin) * ss - 1, (h - 1) * ss - 1),
         radius=CORNER_RADIUS * ss,
-        fill=tuple(int(round(c * 255)) for c in BASE_RGB) + (255,),
+        fill=tuple(int(round(c * 255)) for c in rgb) + (255,),
     )
     return _downsample(img, w + margin, h)
 
@@ -150,7 +157,8 @@ def stroke_layer(
 
 
 def grain_layer(
-    w: int, h: int, margin: int, interior_mask: np.ndarray, x_offset: int = 0
+    w: int, h: int, margin: int, interior_mask: np.ndarray, x_offset: int = 0,
+    tone: float = 1.0,
 ) -> np.ndarray:
     """soil.png at 25% alpha, 8x nearest blowup, clipped to the path interior."""
     soil = Image.open(SOIL_PATH).convert("RGBA")
@@ -159,6 +167,7 @@ def grain_layer(
     xs = (np.arange(w + margin) + x_offset) % tile.width
     ys = np.arange(h) % tile.height
     grain = source[ys[:, None], xs[None, :]]
+    grain[..., :3] *= tone
     grain[..., 3:4] = GRAIN_ALPHA
     grain[..., 3:4] *= interior_mask
     return grain
@@ -168,10 +177,13 @@ def compose(w: int, h: int, open_right: bool = False) -> np.ndarray:
     """Full vanilla pipeline. open_right=True composes the left end of a
     continuous bar (no right-edge rim) for the extension panel."""
     margin = 48 if open_right else 0
+    tone = EXTENSION_TONE if open_right else 1.0
+    border_alpha = EXTENSION_BORDER_ALPHA if open_right else BORDER_ALPHA
 
-    fill = fill_layer(w, h, margin)
+    fill = fill_layer(w, h, margin, tuple(c * tone for c in BASE_RGB))
     glow = stroke_layer(
-        w, h, margin, expand=5.0, width=10.0, rgb=GLOW_RGB, alpha=1.0  # strokeWidth*2
+        w, h, margin, expand=5.0, width=10.0,
+        rgb=tuple(c * tone for c in GLOW_RGB), alpha=1.0  # strokeWidth*2
     )
     base = over(fill, glow)
 
@@ -187,11 +199,12 @@ def compose(w: int, h: int, open_right: bool = False) -> np.ndarray:
     # The extension begins 64px left of the vanilla backdrop. Shift its soil
     # source by -64px, so extension pixel 64 is precisely vanilla pixel 0.
     grain_offset = -EXT_BASE_W if open_right else 0
-    base = over(base, grain_layer(w, h, margin, interior, grain_offset))
+    base = over(base, grain_layer(w, h, margin, interior, grain_offset, tone))
 
     # Border: rgba(45,35,33,0.5625), width strokeWidth = 5.
     border = stroke_layer(
-        w, h, margin, expand=2.5, width=5.0, rgb=BORDER_RGB, alpha=BORDER_ALPHA
+        w, h, margin, expand=2.5, width=5.0,
+        rgb=tuple(c * tone for c in BORDER_RGB), alpha=border_alpha
     )
     base = over(base, border)
 
@@ -294,8 +307,11 @@ def main() -> None:
             (VAN_W, VAN_H, False, ASSETS_SRC / "vanilla-hotbar-background.xcf", "van"),
         ]:
             margin = 48 if open_right else 0
-            fill = fill_layer(w, h, margin)
-            glow = stroke_layer(w, h, margin, 5.0, 10.0, GLOW_RGB, 1.0)
+            tone = EXTENSION_TONE if open_right else 1.0
+            border_alpha = EXTENSION_BORDER_ALPHA if open_right else BORDER_ALPHA
+            fill = fill_layer(w, h, margin, tuple(c * tone for c in BASE_RGB))
+            glow = stroke_layer(
+                w, h, margin, 5.0, 10.0, tuple(c * tone for c in GLOW_RGB), 1.0)
             fill_glow = over(fill, glow)
             blurred = blur_full_rgb(fill_glow[..., :3] * fill_glow[..., 3:4])
             bottom = np.concatenate(
@@ -304,8 +320,9 @@ def main() -> None:
             )
             interior = (fill[..., 3] > 0.5).astype(np.float64)[..., None]
             grain_offset = -EXT_BASE_W if open_right else 0
-            grain = grain_layer(w, h, margin, interior, grain_offset)
-            border = stroke_layer(w, h, margin, 2.5, 5.0, BORDER_RGB, BORDER_ALPHA)
+            grain = grain_layer(w, h, margin, interior, grain_offset, tone)
+            border = stroke_layer(
+                w, h, margin, 2.5, 5.0, tuple(c * tone for c in BORDER_RGB), border_alpha)
             layers = layer_pngs(bottom, grain, interior, border, tmp, prefix)
             if open_right:
                 layers = []

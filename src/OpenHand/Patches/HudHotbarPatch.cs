@@ -92,13 +92,80 @@ internal static class HudHotbarPatch
 
     private static void Prefix(object __instance)
     {
-        if (OpenHandRuntime.IsSelected(OpenHandModSystem.ClientApi?.World?.Player) &&
-            HotbarGridField?.GetValue(__instance) is GuiElementItemSlotGridBase grid)
+        ICoreClientAPI? capi = OpenHandModSystem.ClientApi;
+        if (capi is null ||
+            HotbarGridField?.GetValue(__instance) is not GuiElementItemSlotGridBase grid ||
+            grid.SlotBounds is not { Length: > 0 } slotBounds ||
+            slotBounds[0] is null)
+        {
+            return;
+        }
+
+        ElementBounds slotZero = slotBounds[0];
+        int size = slotZero.OuterWidthInt;
+        (int x, int y, bool drawHotbarExtension, string placementDescription) =
+            ResolvePlacement(__instance, grid, slotZero, size);
+        x += config.IconOffsetX;
+        y += config.IconOffsetY;
+        lastPlacementDescription = placementDescription;
+
+        // This must render before HudHotbar.OnRenderGUI. The panel deliberately
+        // overlaps its left edge; rendering in the postfix puts that overlap
+        // above vanilla cells and their stack icons. The prefix lets vanilla
+        // draw every existing hotbar element over the extension instead.
+        if (drawHotbarExtension)
+        {
+            DrawHotbarExtension(capi, __instance, x, y, size);
+        }
+
+        if (OpenHandRuntime.IsSelected(capi.World?.Player))
         {
             grid.RemoveSlotHighlight();
         }
     }
 
+    private static void DrawHotbarExtension(ICoreClientAPI capi, object instance, int x, int y, int size)
+    {
+        int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
+        // BlurFull(scaled(9)) leaves its left-edge rim visible for roughly 24
+        // scaled pixels into the hotbar. Cover that whole tail.
+        int joinOverlap = Math.Max(1, (int)Math.Round(GuiElement.scaled(24.0)));
+        int hotbarTopInset = Math.Max(1, (int)Math.Round(GuiElement.scaled(10.0)));
+        int hotbarHeight = Math.Max(1, (int)Math.Round(GuiElement.scaled(80.0)));
+        int backgroundX = x - sidePadding;
+        int backgroundY = y - hotbarTopInset;
+        int backgroundRight = x + size + sidePadding;
+
+        if (TryGetHotbarBounds(instance, out ElementBounds hotbarBounds))
+        {
+            // The source panel begins around Open Hand, but it continues below
+            // the vanilla backdrop's left-rim tail. Because this executes in
+            // the prefix, the bar will paint its own cells and stack icons on
+            // top of every overlapped panel pixel.
+            backgroundRight = Math.Max(
+                backgroundRight,
+                (int)hotbarBounds.renderX + joinOverlap);
+        }
+
+        int backgroundWidth = Math.Max(1, backgroundRight - backgroundX);
+        if (hotbarExtensionTexture is null ||
+            hotbarExtensionTexture.Width != backgroundWidth ||
+            hotbarExtensionTexture.Height != hotbarHeight)
+        {
+            BakeHotbarExtensionTexture(capi, backgroundWidth, hotbarHeight);
+        }
+
+        if (hotbarExtensionTexture is not null && hotbarExtensionTexture.TextureId != 0)
+        {
+            capi.Render.Render2DTexture(
+                hotbarExtensionTexture.TextureId,
+                backgroundX,
+                backgroundY,
+                backgroundWidth,
+                hotbarHeight,
+                49f);
+        }
+    }
     private static void Postfix(object __instance)
     {
         ICoreClientAPI? capi = OpenHandModSystem.ClientApi;
@@ -120,7 +187,7 @@ internal static class HudHotbarPatch
         // external left panel so it cannot obstruct the vanilla reserved
         // mission-skill gap; explicit left/right anchors probe the row.
         int size = slotZero.OuterWidthInt;
-        (int x, int y, bool drawHotbarExtension, string placementDescription) = ResolvePlacement(__instance, slotZero, size);
+        (int x, int y, _, string placementDescription) = ResolvePlacement(__instance, grid, slotZero, size);
         x += config.IconOffsetX;
         y += config.IconOffsetY;
         lastPlacementDescription = placementDescription;
@@ -135,50 +202,6 @@ internal static class HudHotbarPatch
             }
         }
 
-        if (drawHotbarExtension)
-        {
-            int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
-            // The hotbar's 9px full blur leaves its left-edge rim visible for
-            // roughly 24 scaled pixels into its own backdrop. Draw beneath
-            // that whole tail so the extension reads as one continuous bar,
-            // rather than terminating against a dark vertical seam.
-            int joinOverlap = Math.Max(1, (int)Math.Round(GuiElement.scaled(24.0)));
-            int hotbarTopInset = Math.Max(1, (int)Math.Round(GuiElement.scaled(10.0)));
-            int hotbarHeight = Math.Max(1, (int)Math.Round(GuiElement.scaled(80.0)));
-            int backgroundX = x - sidePadding;
-            int backgroundY = y - hotbarTopInset;
-            int backgroundWidth = size + sidePadding * 2 + joinOverlap;
-            int backgroundHeight = hotbarHeight;
-            if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
-            {
-                // The extension overlaps the real backdrop's left edge, while
-                // its known vanilla 80px unscaled height and 10px row inset
-                // align it with the actual hotbar, not unrelated HUD widgets
-                // included in the composer's larger bounds.
-                int hotbarLeft = (int)hotbarBounds.renderX;
-                backgroundX = hotbarLeft - size - sidePadding * 2;
-                backgroundY = y - hotbarTopInset;
-                backgroundWidth = hotbarLeft - backgroundX + joinOverlap;
-                backgroundHeight = hotbarHeight;
-            }
-            if (hotbarExtensionTexture is null ||
-                hotbarExtensionTexture.Width != backgroundWidth ||
-                hotbarExtensionTexture.Height != backgroundHeight)
-            {
-                BakeHotbarExtensionTexture(capi, backgroundWidth, backgroundHeight);
-            }
-
-            if (hotbarExtensionTexture is not null && hotbarExtensionTexture.TextureId != 0)
-            {
-                capi.Render.Render2DTexture(
-                    hotbarExtensionTexture.TextureId,
-                    backgroundX,
-                    backgroundY,
-                    backgroundWidth,
-                    backgroundHeight,
-                    49f);
-            }
-        }
         // The Open Hand cell at the anchor-resolved position.
         capi.Render.Render2DTexture(iconTexture.TextureId, x, y, size, size, 50f);
 
@@ -202,7 +225,11 @@ internal static class HudHotbarPatch
     // Resolves the indicator cell position. Automatic placement always uses a
     // safe external left panel; explicit left/right anchors follow the actual
     // rendered row, while offhandGap remains an intentional legacy override.
-    private static (int X, int Y, bool DrawHotbarExtension, string Description) ResolvePlacement(object __instance, ElementBounds slotZero, int size)
+    private static (int X, int Y, bool DrawHotbarExtension, string Description) ResolvePlacement(
+        object __instance,
+        GuiElementItemSlotGridBase hotbarGrid,
+        ElementBounds slotZero,
+        int size)
     {
         int slotZeroX = (int)slotZero.renderX;
         int slotZeroY = (int)slotZero.renderY;
@@ -254,14 +281,15 @@ internal static class HudHotbarPatch
             default:
             {
                 // The vanilla offhand gap is a reserved mission-skill
-                // location, so automatic placement must never occupy it.
-                // Always reserve an external panel left of the hotbar instead.
-                int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
-                if (TryGetHotbarBounds(__instance, out ElementBounds hotbarBounds))
+                // location, so automatic placement must never occupy it. Put
+                // Open Hand one normal cell gutter left of the offhand cell;
+                // the background remains an external left extension.
+                if (__instance is GuiDialog dialog &&
+                    TryGetOffhandBounds(dialog, out ElementBounds offhandBounds))
                 {
-                    int hotbarLeft = (int)hotbarBounds.renderX;
-                    int iconX = hotbarLeft - size - sidePadding;
-                    return (iconX, slotZeroY, true, $"left extension x={iconX} hotbar=[{hotbarLeft}..{hotbarLeft + hotbarBounds.OuterWidthInt}]");
+                    int gutter = GetStandardCellGutter(hotbarGrid, size);
+                    int iconX = (int)offhandBounds.renderX - size - gutter;
+                    return (iconX, slotZeroY, true, $"left extension, offhand gutter={gutter}px");
                 }
 
                 // A missing composer must remain non-fatal.
@@ -322,6 +350,39 @@ internal static class HudHotbarPatch
         return true;
     }
 
+    private static bool TryGetOffhandBounds(GuiDialog dialog, out ElementBounds bounds)
+    {
+        bounds = null!;
+        if (dialog.Composers["hotbar"]?.GetSlotGrid("offhandgrid") is not GuiElementItemSlotGridBase offhandGrid ||
+            offhandGrid.SlotBounds is not { Length: > 0 } offBounds ||
+            offBounds[0] is null)
+        {
+            return false;
+        }
+
+        bounds = offBounds[0];
+        return true;
+    }
+
+    private static int GetStandardCellGutter(GuiElementItemSlotGridBase hotbarGrid, int size)
+    {
+        if (hotbarGrid.SlotBounds is { Length: > 1 } slotBounds &&
+            slotBounds[0] is not null &&
+            slotBounds[1] is not null)
+        {
+            int gutter = (int)slotBounds[1].renderX -
+                ((int)slotBounds[0].renderX + slotBounds[0].OuterWidthInt);
+            if (gutter >= 0)
+            {
+                return gutter;
+            }
+        }
+
+        // The hotbar grid was unavailable or unexpected; retain a compact,
+        // scaled fallback rather than obscuring the offhand cell.
+        return Math.Max(1, (int)Math.Round(GuiElement.scaled(3.0)));
+    }
+
     private static bool TryGetHotbarBounds(object instance, out ElementBounds bounds)
     {
         bounds = null!;
@@ -369,14 +430,11 @@ internal static class HudHotbarPatch
     private static bool TryGetOffhandGap(GuiDialog dialog, int slotZeroX, out (int Start, int End) gap)
     {
         gap = default;
-        if (dialog.Composers["hotbar"]?.GetSlotGrid("offhandgrid") is not GuiElementItemSlotGridBase offhandGrid ||
-            offhandGrid.SlotBounds is not { Length: > 0 } offBounds ||
-            offBounds[0] is null)
+        if (!TryGetOffhandBounds(dialog, out ElementBounds offZero))
         {
             return false;
         }
 
-        ElementBounds offZero = offBounds[0];
         int offhandRight = (int)offZero.renderX + offZero.OuterWidthInt;
         if (offhandRight >= slotZeroX)
         {
