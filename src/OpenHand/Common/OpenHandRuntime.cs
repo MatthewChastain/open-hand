@@ -24,6 +24,14 @@ public static class OpenHandRuntime
             ? Get(player).Select(rememberedHotbarSlot, revision)
             : Get(player).Deselect(rememberedHotbarSlot, revision);
 
+        // The shared empty-hand slot must never carry an item into the next
+        // selection: if any engine code wrote to ActiveHotbarSlot while Open
+        // Hand was selected, drop it here.
+        if (next.IsSelected)
+        {
+            EmptyHandSlot.Itemstack = null;
+        }
+
         States.AddOrUpdate(player.PlayerUID, next, (_, current) => revision >= current.Revision ? next : current);
         return States[player.PlayerUID];
     }
