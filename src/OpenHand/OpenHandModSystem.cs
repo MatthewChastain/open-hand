@@ -47,6 +47,7 @@ public sealed class OpenHandModSystem : ModSystem
     {
         ApplyPatches(api);
         serverController = new OpenHandServerController(api);
+        RegisterServerStatusCommand(api);
 
         if (api.ModLoader.IsModEnabled("foreverempty"))
         {
@@ -149,6 +150,51 @@ public sealed class OpenHandModSystem : ModSystem
                 owner,
                 OpenHandConflictScanner.HintFor(owner, selectionPatch: false));
         }
+    }
+
+    // The chat command is registered on BOTH sides: client commands live under
+    // the '.' prefix while '/' reaches the server's registry, so the
+    // documented `/openhand status` form only exists if the server knows the
+    // command too. In single-player the client runs in-process, letting the
+    // server handler surface the client-side HUD diagnostics as well.
+    private void RegisterServerStatusCommand(ICoreServerAPI api)
+    {
+        api.ChatCommands.Create("openhand")
+            .WithDescription("Open Hand diagnostics")
+            .RequiresPrivilege(Privilege.chat)
+            .BeginSubCommand("status")
+            .WithDescription("Reports the current Open Hand selection and integration status")
+            .HandleWith(args =>
+            {
+                var lines = new List<string>();
+                IPlayer? player = args.Caller.Player;
+                if (player is null)
+                {
+                    lines.Add("No player is loaded.");
+                }
+                else
+                {
+                    OpenHandSelectionState state = OpenHandRuntime.Get(player);
+                    lines.Add($"Selected: {(state.IsSelected ? "yes" : "no")}");
+                    lines.Add($"Remembered hotbar slot: {state.RememberedHotbarSlot}");
+                    lines.Add($"Server revision: {state.Revision}");
+                }
+
+                lines.Add($"Applied patches: {(AppliedPatches.Count > 0 ? string.Join(", ", AppliedPatches) : "none")}");
+                lines.Add($"Failed patches: {(FailedPatches.Count > 0 ? string.Join(", ", FailedPatches) : "none")}");
+                lines.Add($"Forever Empty conflict: {(api.ModLoader.IsModEnabled("foreverempty") ? "DETECTED - remove it" : "none")}");
+
+                // Single-player only: the client HUD runs in this process.
+                if (ClientApi is not null)
+                {
+                    lines.Add($"Icon placement: {Patches.HudHotbarPatch.DescribeIconPlacement()}");
+                    OpenHandConflictScanner.ConflictReport clientReport = ScanConflicts();
+                    lines.Add($"HUD patch owners: {(clientReport.HudPatchOwners.Count > 0 ? string.Join(", ", clientReport.HudPatchOwners) : "none")}");
+                }
+
+                return TextCommandResult.Success(string.Join("\n", lines), "openhand-status");
+            })
+            .EndSubCommand();
     }
 
     private void RegisterStatusCommand(ICoreClientAPI api)

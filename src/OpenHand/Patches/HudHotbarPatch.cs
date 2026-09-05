@@ -164,7 +164,7 @@ internal static class HudHotbarPatch
         // Left of slot 0 is today's fallback whenever the layout cannot be
         // probed; explicit anchors degrade the same graceful way.
         const string FallbackDescription = "left of slot 0 (row probe unavailable)";
-        bool haveRow = __instance is GuiDialog dialog && TryCollectRowIntervals(dialog, slotZeroY, size);
+        bool haveRow = TryCollectRowIntervals(slotZeroY, size);
 
         switch (anchorMode)
         {
@@ -219,13 +219,13 @@ internal static class HudHotbarPatch
                     case OpenHandGapSolver.GapChoice.Preferred:
                     {
                         int x = placement.X - padding;
-                        return (x, slotZeroY, $"preferred gap x={x} ({RowIntervals.Count} row cells)");
+                        return (x, slotZeroY, $"preferred gap x={x} row=[{placement.RowStart}..{placement.RowEnd}] ({RowIntervals.Count} cells)");
                     }
 
                     case OpenHandGapSolver.GapChoice.Largest:
                     {
                         int x = placement.X - padding;
-                        return (x, slotZeroY, $"largest gap x={x} ({RowIntervals.Count} row cells)");
+                        return (x, slotZeroY, $"largest gap x={x} row=[{placement.RowStart}..{placement.RowEnd}] ({RowIntervals.Count} cells)");
                     }
 
                     default:
@@ -242,8 +242,11 @@ internal static class HudHotbarPatch
     }
 
     // Gathers the X intervals of every slot rendered on slot 0's row across
-    // ALL composers of the hotbar dialog, plus the merged row extents.
-    private static bool TryCollectRowIntervals(GuiDialog dialog, int slotZeroY, int size)
+    // ALL composers of EVERY opened dialog, plus the merged row extents.
+    // Scanning every dialog (not just HudHotbar) matters: other mods render
+    // hotbar-row cells from their own dialogs or injected grids, and those
+    // cells constrain the placement exactly like vanilla slots do.
+    private static bool TryCollectRowIntervals(int slotZeroY, int size)
     {
         RowIntervals.Clear();
         if (ComposerStaticElementsField is null || ComposerInteractiveElementsField is null)
@@ -252,10 +255,25 @@ internal static class HudHotbarPatch
             return false;
         }
 
-        foreach (GuiComposer composer in dialog.Composers.Values)
+        ICoreClientAPI? capi = OpenHandModSystem.ClientApi;
+        if (capi is null)
         {
-            CollectRowIntervals(composer, ComposerStaticElementsField, slotZeroY, size);
-            CollectRowIntervals(composer, ComposerInteractiveElementsField, slotZeroY, size);
+            return false;
+        }
+
+        foreach (GuiDialog dialog in capi.Gui.LoadedGuis)
+        {
+            // Hidden dialogs render nothing, so their cells constrain nothing.
+            if (!dialog.IsOpened())
+            {
+                continue;
+            }
+
+            foreach (GuiComposer composer in dialog.Composers.Values)
+            {
+                CollectRowIntervals(composer, ComposerStaticElementsField, slotZeroY, size);
+                CollectRowIntervals(composer, ComposerInteractiveElementsField, slotZeroY, size);
+            }
         }
 
         if (RowIntervals.Count == 0)
