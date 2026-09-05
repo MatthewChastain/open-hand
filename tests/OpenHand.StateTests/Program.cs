@@ -88,11 +88,11 @@ Gap(OpenHandGapSolver.GapChoice.Preferred, 57,
     name: "preferred gap fits");
 
 // Gap solver: a free but narrow preferred gap cannot fit the whole cell and
-// must stack instead of covering either neighboring cell.
+// must use the HUD patch's external-row fallback rather than cover a neighbor.
 Gap(OpenHandGapSolver.GapChoice.None, 0,
     occupied: new List<(int, int)> { (0, 54), (60, 654) }, cellWidth: 54,
     preferred: (54, 60),
-    name: "narrow preferred gap stacks");
+    name: "narrow preferred gap uses external fallback");
 
 // Gap solver: tier 2 - another mod's cell squatting in the preferred gap
 // pushes the indicator to the largest remaining free gap.

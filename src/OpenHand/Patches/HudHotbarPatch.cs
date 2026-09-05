@@ -230,11 +230,13 @@ internal static class HudHotbarPatch
 
                     default:
                     {
-                        // No free gap anywhere on the row: stack the cell above
-                        // the bar, centered, rather than covering a neighbor.
-                        int stackedY = slotZeroY - size - padding;
-                        int centerX = placement.RowStart + (placement.RowEnd - placement.RowStart - size) / 2;
-                        return (centerX, stackedY, $"stacked above row (no free gap; {RowIntervals.Count} cells)");
+                        // No free gap anywhere on the row: use the Open Hand
+                        // cell artwork as a visual extension immediately left
+                        // of the whole bar rather than covering a neighbor.
+                        // Keep one vanilla-sized gutter so its dark border
+                        // reads as another hotbar cell, not an overlap.
+                        int extensionX = placement.RowStart - size - padding;
+                        return (extensionX, slotZeroY, $"left extension x={extensionX} (no free gap; {RowIntervals.Count} cells)");
                     }
                 }
             }
