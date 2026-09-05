@@ -16,8 +16,7 @@ jobs:
       - run: python3 -m json.tool src/OpenHand/modinfo.json > /dev/null
 
   game-build:
-    if: ${{ vars.OPEN_HAND_SELF_HOSTED == 'true' }}
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: dotnet build OpenHand.sln -c Release

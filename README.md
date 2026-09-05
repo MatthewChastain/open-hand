@@ -28,7 +28,7 @@ While Open Hand is selected the engine resolves the main hand as empty. The ten 
 
 ## Build
 
-The project compiles against the Vintage Story 1.22.7 API (see Supported versions). Set `VINTAGE_STORY` or create an ignored `Local.props` that sets `VintageStoryPath` to the game installation directory.
+No game installation is needed: the repo vendors the Vintage Story 1.22.7 reference DLLs it compiles against in `lib/`.
 
 ```bash
 dotnet build OpenHand.sln -c Release

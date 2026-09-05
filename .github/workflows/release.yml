@@ -26,12 +26,10 @@ jobs:
             exit 1
           fi
 
-  # Builds the full mod (requires the game DLLs, hence the self-hosted runner
-  # gated by the OPEN_HAND_SELF_HOSTED variable) and attaches the zip to the
-  # GitHub release for the tag. The tag must match the modinfo version.
+  # Builds the full mod against the vendored lib DLLs and attaches the zip to
+  # the GitHub release for the tag. The tag must match the modinfo version.
   build-and-release:
-    if: ${{ vars.OPEN_HAND_SELF_HOSTED == 'true' }}
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: dotnet build OpenHand.sln -c Release
