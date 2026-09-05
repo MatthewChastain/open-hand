@@ -28,11 +28,10 @@ runs from (0,0) to (W, H-1), so the strokes clip at the surface edges) - the
 composed surface is opaque and the blur edge-clamps on every side.
 
 The Open Hand extension panel is the LEFT END of that same bar: identical rim
-treatment on top/left/bottom, but no right edge. It overlaps the vanilla
-backdrop by 24 px, completely covering that backdrop's left-rim blur tail.
-Its grain is phase-shifted by the pre-overlap panel width so the overlapping
-pixels and the pixels immediately after them continue the vanilla grain
-without a pattern discontinuity.
+treatment on top/left/bottom, but no right edge. Its 59px canonical width is
+the 48px Open Hand cell plus 8px left padding and vanilla's 3px cell gutter,
+so runtime baking does not squash the soil texture after the panel is capped
+at the offhand frame.
 """
 
 from __future__ import annotations
@@ -67,9 +66,7 @@ BLUR_SIGMA = 9  # BlurFull(scaled(9)), GUIScale = 1
 CORNER_RADIUS = 1  # GuiStyle.DialogBGRadius, scaled
 SS = 4  # supersampling factor so strokes get Cairo-quality antialiasing
 
-EXT_BASE_W = 64  # 48px slot + 2 * 8px padding
-JOIN_OVERLAP = 24  # covers the vanilla left-edge blur tail (~24px)
-EXT_W, EXT_H = EXT_BASE_W + JOIN_OVERLAP, 80
+EXT_W, EXT_H = 59, 80  # 8px left padding + 48px cell + 3px cell gutter
 VAN_W, VAN_H = 850, 80  # vanilla hotbar backdrop
 # The standalone panel is rendered over the scene rather than against the
 # hotbar's already-darkened compose surface. The in-game comparison needs a
@@ -77,10 +74,8 @@ VAN_W, VAN_H = 850, 80  # vanilla hotbar backdrop
 # vanilla hue ratios, reduce its RGB energy by 8%, and restore a firmer outer
 # frame. These values apply only to the extension, never the vanilla export.
 EXTENSION_TONE = 0.92
-EXTENSION_BORDER_ALPHA = 0.70
-SHARP_OUTLINE_RGB = (0.0, 0.0, 0.0)
-SHARP_OUTLINE_ALPHA = 0.58
-SHARP_OUTLINE_WIDTH = 2.5
+SLOT_BACK_RGB = (255 / 255, 226 / 255, 194 / 255)  # GuiStyle.ColorSchematic
+SLOT_FRONT_RGB = (132 / 255, 92 / 255, 67 / 255)  # GuiStyle.ColorWood
 
 
 def boxes_for_gauss(sigma: float, n: int = 3) -> list[int]:
@@ -181,7 +176,7 @@ def compose(w: int, h: int, open_right: bool = False) -> np.ndarray:
     continuous bar (no right-edge rim) for the extension panel."""
     margin = 48 if open_right else 0
     tone = EXTENSION_TONE if open_right else 1.0
-    border_alpha = EXTENSION_BORDER_ALPHA if open_right else BORDER_ALPHA
+    border_alpha = BORDER_ALPHA
 
     fill = fill_layer(w, h, margin, tuple(c * tone for c in BASE_RGB))
     glow = stroke_layer(
@@ -199,10 +194,7 @@ def compose(w: int, h: int, open_right: bool = False) -> np.ndarray:
 
     # Grain fills the path interior only (FillPreserve after the blur).
     interior = (fill[..., 3] > 0.5).astype(np.float64)[..., None]
-    # The extension begins 64px left of the vanilla backdrop. Shift its soil
-    # source by -64px, so extension pixel 64 is precisely vanilla pixel 0.
-    grain_offset = -EXT_BASE_W if open_right else 0
-    base = over(base, grain_layer(w, h, margin, interior, grain_offset, tone))
+    base = over(base, grain_layer(w, h, margin, interior, tone=tone))
 
     # Border: rgba(45,35,33,0.5625), width strokeWidth = 5.
     border = stroke_layer(
@@ -210,15 +202,6 @@ def compose(w: int, h: int, open_right: bool = False) -> np.ndarray:
         rgb=tuple(c * tone for c in BORDER_RGB), alpha=border_alpha
     )
     base = over(base, border)
-    if open_right:
-        # The shaded dialog border is deliberately soft. A final unblurred
-        # dark edge gives the standalone panel the crisp perimeter of the
-        # vanilla slot frame without introducing a right-hand join seam.
-        sharp_outline = stroke_layer(
-            w, h, margin, expand=SHARP_OUTLINE_WIDTH / 2,
-            width=SHARP_OUTLINE_WIDTH, rgb=SHARP_OUTLINE_RGB,
-            alpha=SHARP_OUTLINE_ALPHA)
-        base = over(base, sharp_outline)
 
     if open_right:
         base = base[:, :w]
@@ -295,28 +278,45 @@ def report(arr: np.ndarray, label: str, column: int) -> None:
     print(f"  peak at row {peak} {tuple(int(v) for v in rgb[peak, column])}, "
           f"settles by row {settle}, interior base {tuple(int(v) for v in base)}")
 
-def sharpen_openhand_frame() -> None:
-    """Overlay vanilla's final crisp 4.5px / alpha-0.8 slot-frame stroke.
+def rebuild_openhand_slot() -> None:
+    """Rebuild the cell from GuiElementItemSlotGridBase's vanilla recipe.
 
-    The hand glyph and soft background shading remain from the original art.
-    Keeping that art in a separate source file prevents repeated generation
-    from compounding the outline.
+    The final frame is: ColorSchematic fill; ColorWood 4.5px stroke blurred
+    twice with BlurFull(4); then an unblurred 4.5px, 80%-black stroke. Only
+    the hand glyph is extracted from the previous art, so none of its soft
+    painted border can weaken the standard slot outline.
     """
     source = Image.open(ASSETS_SRC / "openhand-frame-base.png").convert("RGBA")
-    canvas = source.resize((source.width * SS, source.height * SS), Image.Resampling.NEAREST)
-    outline = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    half_width = 4.5 * SS / 2
-    ImageDraw.Draw(outline).rounded_rectangle(
-        (-half_width, -half_width,
-         canvas.width + half_width - 1, canvas.height + half_width - 1),
-        radius=SS,
-        outline=(0, 0, 0, int(0.8 * 255)),
-        width=int(round(4.5 * SS)),
+    size = source.width
+
+    frame = fill_layer(size, size, 0, SLOT_BACK_RGB)
+    front = stroke_layer(size, size, 0, 4.5 / 2, 4.5, SLOT_FRONT_RGB, 1.0)
+    frame = over(frame, front)
+    frame_rgb = blur_full_rgb(frame[..., :3] * frame[..., 3:4], 4)
+    frame = np.concatenate([frame_rgb, frame[..., 3:4]], axis=-1)
+    frame_rgb = blur_full_rgb(frame[..., :3] * frame[..., 3:4], 4)
+    frame = np.concatenate([frame_rgb, frame[..., 3:4]], axis=-1)
+    final_stroke = stroke_layer(size, size, 0, 4.5 / 2, 4.5, (0, 0, 0), 0.8)
+    frame = over(frame, final_stroke)
+
+    original = np.asarray(source, dtype=np.float64) / 255.0
+    luminance = (
+        original[..., 0] * 0.299 +
+        original[..., 1] * 0.587 +
+        original[..., 2] * 0.114
     )
-    canvas.alpha_composite(outline)
-    canvas.resize(source.size, Image.Resampling.LANCZOS).save(
-        REPO / "assets/openhand/textures/hud/openhand.png"
-    )
+    glyph_alpha = np.clip((0.79 - luminance) / 0.16, 0.0, 1.0)
+    # The source border is not part of the glyph. Its fingertips start well
+    # inside this inset, so excluding the four outer pixels keeps the outline
+    # entirely vanilla while preserving the hand.
+    glyph_alpha[:4, :] = 0
+    glyph_alpha[-4:, :] = 0
+    glyph_alpha[:, :4] = 0
+    glyph_alpha[:, -4:] = 0
+    glyph = np.dstack([original[..., :3], glyph_alpha])
+    result = over(frame, glyph)
+    save_png(ASSETS_SRC / "openhand-slot-rebuilt.png", result)
+    save_png(REPO / "assets/openhand/textures/hud/openhand.png", result)
 
 
 def main() -> None:
@@ -324,7 +324,7 @@ def main() -> None:
     ext = compose(EXT_W, EXT_H, open_right=True)
     save_png(REPO / "assets/openhand/textures/hud/hotbar-extension.png", ext)
     save_png(ASSETS_SRC / "hotbar-extension-background.png", ext)
-    sharpen_openhand_frame()
+    rebuild_openhand_slot()
 
     # --- vanilla bar ------------------------------------------------------
     van = compose(VAN_W, VAN_H)
@@ -344,7 +344,7 @@ def main() -> None:
         ]:
             margin = 48 if open_right else 0
             tone = EXTENSION_TONE if open_right else 1.0
-            border_alpha = EXTENSION_BORDER_ALPHA if open_right else BORDER_ALPHA
+            border_alpha = BORDER_ALPHA
             fill = fill_layer(w, h, margin, tuple(c * tone for c in BASE_RGB))
             glow = stroke_layer(
                 w, h, margin, 5.0, 10.0, tuple(c * tone for c in GLOW_RGB), 1.0)
@@ -355,15 +355,9 @@ def main() -> None:
                 axis=-1,
             )
             interior = (fill[..., 3] > 0.5).astype(np.float64)[..., None]
-            grain_offset = -EXT_BASE_W if open_right else 0
-            grain = grain_layer(w, h, margin, interior, grain_offset, tone)
+            grain = grain_layer(w, h, margin, interior, tone=tone)
             border = stroke_layer(
                 w, h, margin, 2.5, 5.0, tuple(c * tone for c in BORDER_RGB), border_alpha)
-            if open_right:
-                sharp_outline = stroke_layer(
-                    w, h, margin, SHARP_OUTLINE_WIDTH / 2, SHARP_OUTLINE_WIDTH,
-                    SHARP_OUTLINE_RGB, SHARP_OUTLINE_ALPHA)
-                border = over(border, sharp_outline)
             layers = layer_pngs(bottom, grain, interior, border, tmp, prefix)
             if open_right:
                 layers = []
