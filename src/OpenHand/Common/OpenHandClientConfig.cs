@@ -36,6 +36,13 @@ public sealed class OpenHandClientConfig
     /// </summary>
     public bool CenterHotbar { get; set; } = true;
 
+    /// <summary>
+    /// Re-tap entry: pressing the number key of the already-active hotbar
+    /// slot selects Open Hand instead of doing nothing. Off by default; the
+    /// selection itself still runs through the server-validated path.
+    /// </summary>
+    public bool DoubleTapHotbarKey { get; set; }
+
     /// <summary>Parses the anchor setting; unknown values resolve to Auto.</summary>
     public static IconAnchorMode ParseIconAnchor(string? value)
     {

@@ -43,9 +43,15 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
     // toggle code, so the same binding works before the world HUD exists.
     public override string ToggleKeyCombinationCode => null!;
 
+    // Layout: 480px wide with generous vertical spacing and clear sectioning:
+    // - Behavior switches (pitch 36px, right-aligned)
+    // - Indicator position (280px dropdown prevents text truncation)
+    // - Pixel offset steppers
+    // - Help text block with dedicated vertical clearance
+    // - Footer buttons safely below the wrapped help text
     private void ComposeDialog()
     {
-        ElementBounds inner = ElementBounds.Fixed(EnumDialogArea.CenterMiddle, 0, 0, 430, 300);
+        ElementBounds inner = ElementBounds.Fixed(EnumDialogArea.CenterMiddle, 0, 0, 480, 424);
         ElementBounds outer = inner.FlatCopy().FixedGrow(0, 34);
         CairoFont label = CairoFont.WhiteDetailText();
         CairoFont small = CairoFont.WhiteSmallText();
@@ -54,35 +60,38 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
             .AddShadedDialogBG(ElementBounds.Fill, withTitleBar: false)
             .AddDialogTitleBar("Open Hand Settings", () => TryClose())
             .BeginChildElements(inner)
-                .AddStaticText("Visual indicator", label, ElementBounds.Fixed(15, 14, 250, 22), "showIndicatorLabel")
-                .AddSwitch(OnShowIndicatorToggled, ElementBounds.Fixed(385, 14, 28, 28), "showIndicator")
-                .AddStaticText("Center hotbar", label, ElementBounds.Fixed(15, 49, 250, 22), "centerLabel")
-                .AddSwitch(OnCenterToggled, ElementBounds.Fixed(385, 49, 28, 28), "centerHotbar")
-                .AddStaticText("Indicator position", label, ElementBounds.Fixed(15, 94, 180, 22), "anchorLabel")
+                .AddStaticText("Visual indicator", label, ElementBounds.Fixed(18, 28, 380, 22), "showIndicatorLabel")
+                .AddSwitch(OnShowIndicatorToggled, ElementBounds.Fixed(434, 25, 28, 28), "showIndicator")
+                .AddStaticText("Center hotbar", label, ElementBounds.Fixed(18, 64, 380, 22), "centerLabel")
+                .AddSwitch(OnCenterToggled, ElementBounds.Fixed(434, 61, 28, 28), "centerHotbar")
+                .AddStaticText("Slot key double-tap", label, ElementBounds.Fixed(18, 100, 380, 22), "doubleTapLabel")
+                .AddSwitch(OnDoubleTapToggled, ElementBounds.Fixed(434, 97, 28, 28), "doubleTap")
+                .AddStaticText("Indicator position", label, ElementBounds.Fixed(18, 144, 160, 22), "anchorLabel")
                 .AddDropDown(AnchorValues, AnchorNames, AnchorIndex(),
-                    OnAnchorSelected, ElementBounds.Fixed(200, 92, 213, 25), "anchor")
-                .AddStaticText("Icon offset X", label, ElementBounds.Fixed(15, 133, 130, 22), "offsetXLabel")
+                    OnAnchorSelected, ElementBounds.Fixed(180, 141, 282, 26), "anchor")
+                .AddStaticText("Icon offset X", label, ElementBounds.Fixed(18, 182, 130, 22), "offsetXLabel")
                 .AddSmallButton("-", () => NudgeOffset(axisX: true, -1),
-                    ElementBounds.Fixed(150, 129, 24, 24), EnumButtonStyle.Small, "offsetXMinus")
+                    ElementBounds.Fixed(160, 180, 24, 24), EnumButtonStyle.Small, "offsetXMinus")
                 .AddDynamicText(OffsetText(c => c.IconOffsetX), small,
-                    ElementBounds.Fixed(182, 133, 50, 22), "offsetX")
+                    ElementBounds.Fixed(192, 182, 55, 22), "offsetX")
                 .AddSmallButton("+", () => NudgeOffset(axisX: true, 1),
-                    ElementBounds.Fixed(238, 129, 24, 24), EnumButtonStyle.Small, "offsetXPlus")
-                .AddStaticText("Icon offset Y", label, ElementBounds.Fixed(15, 163, 130, 22), "offsetYLabel")
+                    ElementBounds.Fixed(252, 180, 24, 24), EnumButtonStyle.Small, "offsetXPlus")
+                .AddStaticText("Icon offset Y", label, ElementBounds.Fixed(18, 216, 130, 22), "offsetYLabel")
                 .AddSmallButton("-", () => NudgeOffset(axisX: false, -1),
-                    ElementBounds.Fixed(150, 159, 24, 24), EnumButtonStyle.Small, "offsetYMinus")
+                    ElementBounds.Fixed(160, 214, 24, 24), EnumButtonStyle.Small, "offsetYMinus")
                 .AddDynamicText(OffsetText(c => c.IconOffsetY), small,
-                    ElementBounds.Fixed(182, 163, 50, 22), "offsetY")
+                    ElementBounds.Fixed(192, 216, 55, 22), "offsetY")
                 .AddSmallButton("+", () => NudgeOffset(axisX: false, 1),
-                    ElementBounds.Fixed(238, 159, 24, 24), EnumButtonStyle.Small, "offsetYPlus")
+                    ElementBounds.Fixed(252, 214, 24, 24), EnumButtonStyle.Small, "offsetYPlus")
                 .AddStaticText(
                     "Centering applies only to compatible layouts and falls back automatically. " +
-                    "With the indicator hidden, entering Open Hand is hotkey-only.",
-                    small, ElementBounds.Fixed(15, 196, 400, 40), "help")
+                    "With the indicator hidden, entering Open Hand is hotkey-only. " +
+                    "Slot key double-tap selects Open Hand when the active slot's number key is pressed again.",
+                    small, ElementBounds.Fixed(18, 258, 444, 90), "help")
                 .AddSmallButton("Reset defaults", ResetDefaults,
-                    ElementBounds.Fixed(15, 258, 110, 26), EnumButtonStyle.Small, "reset")
+                    ElementBounds.Fixed(18, 374, 120, 28), EnumButtonStyle.Small, "reset")
                 .AddSmallButton("Done", () => TryClose(),
-                    ElementBounds.Fixed(328, 258, 85, 26), EnumButtonStyle.Small, "done")
+                    ElementBounds.Fixed(372, 374, 90, 28), EnumButtonStyle.Small, "done")
             .EndChildElements()
             // Without Compose the static texture is never built: the dialog
             // opens (mouse ungrabbed) but renders nothing.
@@ -90,6 +99,7 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
 
         Composers["settings"].GetSwitch("showIndicator").SetValue(config().ShowIndicator);
         Composers["settings"].GetSwitch("centerHotbar").SetValue(config().CenterHotbar);
+        Composers["settings"].GetSwitch("doubleTap").SetValue(config().DoubleTapHotbarKey);
     }
 
     private int AnchorIndex()
@@ -107,6 +117,9 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
 
     private void OnCenterToggled(bool on) =>
         applyAndSave(c => c.CenterHotbar = on);
+
+    private void OnDoubleTapToggled(bool on) =>
+        applyAndSave(c => c.DoubleTapHotbarKey = on);
 
     // Single-select dropdowns invoke (selectedValue, true); the value is the
     // stored anchor string itself.
@@ -136,6 +149,7 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
             c.IconOffsetY = 0;
             c.ShowIndicator = true;
             c.CenterHotbar = true;
+            c.DoubleTapHotbarKey = false;
         });
         Composers.ClearComposers();
         ComposeDialog();

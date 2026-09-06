@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/OpenHand/Common/OpenHandSelectionState.cs" Link="OpenHandSelectionState.cs" />
+    <Compile Include="../../src/OpenHand/Common/OpenHandDoubleTap.cs" Link="OpenHandDoubleTap.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandWheelRing.cs" Link="OpenHandWheelRing.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandGapSolver.cs" Link="OpenHandGapSolver.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandClientConfig.cs" Link="OpenHandClientConfig.cs" />
