@@ -7,5 +7,9 @@
   <ItemGroup>
     <Compile Include="../../src/OpenHand/Common/OpenHandSelectionState.cs" Link="OpenHandSelectionState.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandWheelRing.cs" Link="OpenHandWheelRing.cs" />
+    <Compile Include="../../src/OpenHand/Common/OpenHandGapSolver.cs" Link="OpenHandGapSolver.cs" />
+    <Compile Include="../../src/OpenHand/Common/OpenHandClientConfig.cs" Link="OpenHandClientConfig.cs" />
+    <Compile Include="../../src/OpenHand/Common/OpenHandHudGeometry.cs" Link="OpenHandHudGeometry.cs" />
+    <Compile Include="../../src/OpenHand/Common/OpenHandCenteringGeometry.cs" Link="OpenHandCenteringGeometry.cs" />
   </ItemGroup>
 </Project>

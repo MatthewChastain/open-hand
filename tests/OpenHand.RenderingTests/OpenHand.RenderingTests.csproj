@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <!-- Local-only: intentionally outside the solution/CI state-test project. -->
+  <ItemGroup>
+    <ProjectReference Include="../../src/OpenHand/OpenHand.csproj" />
+    <Reference Include="0Harmony" HintPath="$(VintageStoryPath)/Lib/0Harmony.dll" />
+    <Reference Include="VintagestoryLib" HintPath="$(VintageStoryPath)/VintagestoryLib.dll" />
+    <Reference Include="VintagestoryAPI" HintPath="$(VintageStoryPath)/VintagestoryAPI.dll" />
+    <Reference Include="cairo-sharp" HintPath="$(VintageStoryPath)/Lib/cairo-sharp.dll" />
+    <Reference Include="SkiaSharp" HintPath="$(VintageStoryPath)/Lib/SkiaSharp.dll" />
+    <Reference Include="Newtonsoft.Json" HintPath="$(VintageStoryPath)/Lib/Newtonsoft.Json.dll" />
+  </ItemGroup>
+</Project>

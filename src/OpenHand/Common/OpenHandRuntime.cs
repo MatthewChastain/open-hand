@@ -6,7 +6,7 @@ namespace OpenHand.Common;
 public static class OpenHandRuntime
 {
     private static readonly ConcurrentDictionary<string, OpenHandSelectionState> States = new();
-    private static readonly DummySlot EmptyHandSlot = new(null);
+    private static readonly EmptyHandDummySlot EmptyHandSlot = new();
 
     public static bool IsSelected(IPlayer? player) =>
         player is not null &&
@@ -14,6 +14,34 @@ public static class OpenHandRuntime
         state.IsSelected;
 
     public static ItemSlot EmptySlot => EmptyHandSlot;
+
+    // The substituted slot must satisfy vanilla's contract for
+    // ActiveHotbarSlot: it always belongs to the player's hotbar inventory.
+    // Mods legitimately dereference slot.Inventory on every tick (Overhaul
+    // lib legacy compat crashed on the null this used to return), so attach
+    // the caller's hotbar inventory before handing the slot out. GetSlotId
+    // then returns -1, the documented result for a slot not stored in the
+    // inventory. The reference write is atomic; with multiple players the
+    // last writer wins and identity comparisons stay correct either way.
+    public static ItemSlot EmptySlotFor(IPlayer player)
+    {
+        if (player.InventoryManager?.GetHotbarInventory() is InventoryBase inventory &&
+            !ReferenceEquals(EmptyHandSlot.Inventory, inventory))
+        {
+            EmptyHandSlot.AttachInventory(inventory);
+        }
+
+        return EmptyHandSlot;
+    }
+
+    // ItemSlot.Inventory is a read-only property over this protected field,
+    // so the attach has to live in a subclass.
+    private sealed class EmptyHandDummySlot : DummySlot
+    {
+        public EmptyHandDummySlot() : base(null) { }
+
+        public void AttachInventory(InventoryBase? inventory) => this.inventory = inventory;
+    }
 
     public static OpenHandSelectionState Get(IPlayer player) =>
         States.GetOrAdd(player.PlayerUID, _ => OpenHandSelectionState.Unselected(player.InventoryManager.ActiveHotbarSlotNumber));

@@ -15,8 +15,17 @@ public sealed class OpenHandModSystem : ModSystem
     private Harmony? harmony;
     private OpenHandClientController? clientController;
     private OpenHandServerController? serverController;
+    private OpenHandClientConfig clientConfig = new();
+    private OpenHandSettingsDialog? settingsDialog;
 
     internal static ICoreClientAPI? ClientApi { get; private set; }
+
+    /// <summary>
+    /// Current hotbar centering translation in screen pixels, or zero when
+    /// inactive. Client renderers may add this to hotbar-attached coordinates.
+    /// Read during rendering; do not cache across frames or world transitions.
+    /// </summary>
+    public static int HotbarCenteringOffsetX => HudHotbarPatch.CenteringOffsetX;
 
     internal static HashSet<string> AppliedPatches { get; } = new();
 
@@ -26,11 +35,15 @@ public sealed class OpenHandModSystem : ModSystem
     {
         ClientApi = api;
         ApplyPatches(api);
-        clientController = new OpenHandClientController(api);
+        ApplyClientConfig(api);
+        clientController = new OpenHandClientController(
+            api, () => ToggleSettingsDialog(api),
+            () => clientConfig.ShowIndicator);
+        ReportClientConflicts();
 
         // GL texture IDs change across world transitions and texture reloads;
         // drop the cached indicator texture so it is re-uploaded next render.
-        api.Event.LeftWorld += Patches.HudHotbarPatch.ResetIconTexture;
+        api.Event.LeftWorld += Patches.HudHotbarPatch.OnLeftWorld;
         api.Event.ReloadTextures += Patches.HudHotbarPatch.ResetIconTexture;
 
         RegisterStatusCommand(api);
@@ -45,6 +58,7 @@ public sealed class OpenHandModSystem : ModSystem
     {
         ApplyPatches(api);
         serverController = new OpenHandServerController(api);
+        RegisterServerStatusCommand(api);
 
         if (api.ModLoader.IsModEnabled("foreverempty"))
         {
@@ -67,6 +81,15 @@ public sealed class OpenHandModSystem : ModSystem
         {
             try
             {
+                // Single-player starts both sides in one process. Harmony
+                // appends duplicate patch methods if registered twice.
+                System.Reflection.MethodBase? target = patchType == typeof(ActiveHandPatch)
+                    ? ActiveHandPatch.TargetMethod() : HudHotbarPatch.TargetMethod();
+                if (target is not null && Harmony.GetPatchInfo(target)?.Owners.Contains(HarmonyId) == true)
+                {
+                    AppliedPatches.Add(patchType.Name);
+                    continue;
+                }
                 harmony.CreateClassProcessor(patchType).Patch();
                 AppliedPatches.Add(patchType.Name);
             }
@@ -79,6 +102,186 @@ public sealed class OpenHandModSystem : ModSystem
                     exception);
             }
         }
+    }
+
+    // Client-only indicator and wheel-entry preference; selection sync is unchanged.
+    private void ApplyClientConfig(ICoreClientAPI api)
+    {
+        OpenHandClientConfig? loadedConfig;
+        try
+        {
+            loadedConfig = api.LoadModConfig<OpenHandClientConfig>(OpenHandClientConfig.ConfigFileName);
+        }
+        catch (Exception exception)
+        {
+            Mod.Logger.Error("Open Hand client config could not be parsed; using defaults: {0}", exception.Message);
+            loadedConfig = null;
+        }
+
+        clientConfig = loadedConfig ?? new OpenHandClientConfig();
+        IconAnchorMode anchorMode = OpenHandClientConfig.ParseIconAnchor(clientConfig.IconAnchor);
+        if (!OpenHandClientConfig.IsKnownIconAnchor(clientConfig.IconAnchor))
+        {
+            Mod.Logger.Warning(
+                "Open Hand client config has unknown iconAnchor '{0}'; using 'auto'. Expected auto, offhandGap, left, or right.",
+                clientConfig.IconAnchor ?? "");
+        }
+
+        HudHotbarPatch.ApplyConfig(clientConfig, anchorMode);
+
+        try
+        {
+            // Persists defaults on first run; existing files are re-written
+            // unchanged (configs here carry no comments to preserve).
+            api.StoreModConfig(clientConfig, OpenHandClientConfig.ConfigFileName);
+        }
+        catch (Exception exception)
+        {
+            Mod.Logger.Error("Open Hand client config could not be saved: {0}", exception.Message);
+        }
+    }
+
+    // Shared by the chat commands and the settings dialog: mutate, push to
+    // runtime, persist. UI surfaces decide their own feedback.
+    internal void ApplyAndSaveClientConfig(Action<OpenHandClientConfig> mutate)
+    {
+        mutate(clientConfig);
+        HudHotbarPatch.ApplyConfig(
+            clientConfig,
+            OpenHandClientConfig.ParseIconAnchor(clientConfig.IconAnchor));
+        try
+        {
+            ClientApi?.StoreModConfig(clientConfig, OpenHandClientConfig.ConfigFileName);
+        }
+        catch (Exception exception)
+        {
+            Mod.Logger.Error("Open Hand client config could not be saved: {0}", exception.Message);
+        }
+    }
+
+    private void ToggleSettingsDialog(ICoreClientAPI api)
+    {
+        settingsDialog ??= new OpenHandSettingsDialog(
+            api, () => clientConfig, ApplyAndSaveClientConfig);
+        settingsDialog.Toggle();
+    }
+
+    private void SetIndicatorVisibility(ICoreClientAPI api, bool showIndicator)
+    {
+        clientConfig.ShowIndicator = showIndicator;
+        HudHotbarPatch.ApplyConfig(
+            clientConfig,
+            OpenHandClientConfig.ParseIconAnchor(clientConfig.IconAnchor));
+
+        try
+        {
+            api.StoreModConfig(clientConfig, OpenHandClientConfig.ConfigFileName);
+            api.ShowChatMessage(
+                $"Open Hand visual indicator is now {(showIndicator ? "on" : "off")}.");
+        }
+        catch (Exception exception)
+        {
+            Mod.Logger.Error(
+                "Open Hand client config could not be saved after changing indicator visibility: {0}",
+                exception.Message);
+            api.ShowChatMessage(
+                $"Open Hand visual indicator is now {(showIndicator ? "on" : "off")}, but the setting could not be saved.");
+        }
+    }
+
+    private TextCommandResult SetHotbarCentering(ICoreClientAPI api, bool enabled)
+    {
+        clientConfig.CenterHotbar = enabled;
+        HudHotbarPatch.ApplyConfig(clientConfig, OpenHandClientConfig.ParseIconAnchor(clientConfig.IconAnchor));
+        string message = enabled
+            ? "Open Hand centering enabled for compatible layouts. Use .openhand status to check whether it is active."
+            : "Open Hand centering disabled.";
+        try
+        {
+            api.StoreModConfig(clientConfig, OpenHandClientConfig.ConfigFileName);
+        }
+        catch (Exception exception)
+        {
+            Mod.Logger.Error("Open Hand centering preference could not be saved: {0}", exception.Message);
+            message += " The setting could not be saved.";
+        }
+        return TextCommandResult.Success(message);
+    }
+
+    // Generic conflict detection: WHO patches the methods Open Hand relies on
+    // (via Harmony patch ownership), never WHAT mod it is. Behavior never
+    // branches on these names; they only shape warning text.
+    private static OpenHandConflictScanner.ConflictReport ScanConflicts()
+    {
+        return OpenHandConflictScanner.Scan(
+            Patches.ActiveHandPatch.TargetMethod(),
+            Patches.HudHotbarPatch.TargetMethod(),
+            HarmonyId);
+    }
+
+    private void ReportClientConflicts()
+    {
+        OpenHandConflictScanner.ConflictReport report = ScanConflicts();
+        foreach (string owner in report.SelectionPatchOwners)
+        {
+            Mod.Logger.Warning(
+                "Another mod ({0}) patches the hotbar slot resolution Open Hand substitutes: {1}",
+                owner,
+                OpenHandConflictScanner.HintFor(owner, selectionPatch: true));
+        }
+
+        foreach (string owner in report.HudPatchOwners)
+        {
+            Mod.Logger.Notification(
+                "Another mod ({0}) customizes the hotbar HUD. If the Open Hand indicator overlaps other cells, set IconAnchor or IconOffsetX/IconOffsetY in openhand.json. ({1})",
+                owner,
+                OpenHandConflictScanner.HintFor(owner, selectionPatch: false));
+        }
+    }
+
+    // The chat command is registered on BOTH sides: client commands live under
+    // the '.' prefix while '/' reaches the server's registry, so the
+    // documented `/openhand status` form only exists if the server knows the
+    // command too. In single-player the client runs in-process, letting the
+    // server handler surface the client-side HUD diagnostics as well.
+    private void RegisterServerStatusCommand(ICoreServerAPI api)
+    {
+        api.ChatCommands.Create("openhand")
+            .WithDescription("Open Hand diagnostics")
+            .RequiresPrivilege(Privilege.chat)
+            .BeginSubCommand("status")
+            .WithDescription("Reports the current Open Hand selection and integration status")
+            .HandleWith(args =>
+            {
+                var lines = new List<string>();
+                IPlayer? player = args.Caller.Player;
+                if (player is null)
+                {
+                    lines.Add("No player is loaded.");
+                }
+                else
+                {
+                    OpenHandSelectionState state = OpenHandRuntime.Get(player);
+                    lines.Add($"Selected: {(state.IsSelected ? "yes" : "no")}");
+                    lines.Add($"Remembered hotbar slot: {state.RememberedHotbarSlot}");
+                    lines.Add($"Server revision: {state.Revision}");
+                }
+
+                lines.Add($"Applied patches: {(AppliedPatches.Count > 0 ? string.Join(", ", AppliedPatches) : "none")}");
+                lines.Add($"Failed patches: {(FailedPatches.Count > 0 ? string.Join(", ", FailedPatches) : "none")}");
+                lines.Add($"Forever Empty conflict: {(api.ModLoader.IsModEnabled("foreverempty") ? "DETECTED - remove it" : "none")}");
+
+                // Single-player only: the client HUD runs in this process.
+                if (ClientApi is not null)
+                {
+                    lines.Add($"Icon placement: {Patches.HudHotbarPatch.DescribeIconPlacement()}");
+                    OpenHandConflictScanner.ConflictReport clientReport = ScanConflicts();
+                    lines.Add($"HUD patch owners: {(clientReport.HudPatchOwners.Count > 0 ? string.Join(", ", clientReport.HudPatchOwners) : "none")}");
+                }
+
+                return TextCommandResult.Success(string.Join("\n", lines), "openhand-status");
+            })
+            .EndSubCommand();
     }
 
     private void RegisterStatusCommand(ICoreClientAPI api)
@@ -106,14 +309,64 @@ public sealed class OpenHandModSystem : ModSystem
                 lines.Add($"Applied patches: {(AppliedPatches.Count > 0 ? string.Join(", ", AppliedPatches) : "none")}");
                 lines.Add($"Failed patches: {(FailedPatches.Count > 0 ? string.Join(", ", FailedPatches) : "none")}");
                 lines.Add($"Forever Empty conflict: {(api.ModLoader.IsModEnabled("foreverempty") ? "DETECTED - remove it" : "none")}");
+                lines.Add($"Icon placement: {Patches.HudHotbarPatch.DescribeIconPlacement()}");
+                OpenHandConflictScanner.ConflictReport report = ScanConflicts();
+                lines.Add($"Selection patch owners: {(report.SelectionPatchOwners.Count > 0 ? string.Join(", ", report.SelectionPatchOwners) : "none")}");
+                lines.Add($"HUD patch owners: {(report.HudPatchOwners.Count > 0 ? string.Join(", ", report.HudPatchOwners) : "none")}");
                 api.ShowChatMessage(string.Join("\n", lines));
                 return TextCommandResult.Success("", "openhand-status");
             })
+            .EndSubCommand()
+            .BeginSubCommand("indicator")
+            .WithDescription("Controls the client-only Open Hand visual indicator")
+            .BeginSubCommand("on")
+            .WithDescription("Shows the Open Hand visual indicator")
+            .HandleWith(_ =>
+            {
+                SetIndicatorVisibility(api, true);
+                return TextCommandResult.Success("", "openhand-indicator-on");
+            })
+            .EndSubCommand()
+            .BeginSubCommand("off")
+            .WithDescription("Hides the Open Hand visual indicator")
+            .HandleWith(_ =>
+            {
+                SetIndicatorVisibility(api, false);
+                return TextCommandResult.Success("", "openhand-indicator-off");
+            })
+            .EndSubCommand()
+            .BeginSubCommand("toggle")
+            .WithDescription("Toggles the Open Hand visual indicator")
+            .HandleWith(_ =>
+            {
+                SetIndicatorVisibility(api, !clientConfig.ShowIndicator);
+                return TextCommandResult.Success("", "openhand-indicator-toggle");
+            })
+            .EndSubCommand()
+            .EndSubCommand()
+            .BeginSubCommand("center")
+            .WithDescription("Opts into centering the visible automatic hotbar extension")
+            .BeginSubCommand("on")
+            .WithDescription("Enables centering for compatible layouts")
+            .HandleWith(_ => SetHotbarCentering(api, true))
+            .EndSubCommand()
+            .BeginSubCommand("off")
+            .WithDescription("Restores the original hotbar position")
+            .HandleWith(_ => SetHotbarCentering(api, false))
+            .EndSubCommand()
+            .BeginSubCommand("toggle")
+            .WithDescription("Toggles the saved hotbar centering preference")
+            .HandleWith(_ => SetHotbarCentering(api, !clientConfig.CenterHotbar))
+            .EndSubCommand()
             .EndSubCommand();
     }
 
     public override void Dispose()
     {
+        settingsDialog?.Dispose();
+        settingsDialog = null;
+        HudHotbarPatch.DetachContinuousBackground();
+        HudHotbarPatch.ResetIconTexture();
         clientController?.Dispose();
         serverController?.Dispose();
         harmony?.UnpatchAll(HarmonyId);
@@ -121,7 +374,7 @@ public sealed class OpenHandModSystem : ModSystem
         ICoreClientAPI? clientApi = ClientApi;
         if (clientApi is not null)
         {
-            clientApi.Event.LeftWorld -= Patches.HudHotbarPatch.ResetIconTexture;
+            clientApi.Event.LeftWorld -= Patches.HudHotbarPatch.OnLeftWorld;
             clientApi.Event.ReloadTextures -= Patches.HudHotbarPatch.ResetIconTexture;
         }
 
