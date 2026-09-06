@@ -60,13 +60,12 @@ internal static class ClientHotkeyTests
             // Visibility must not read or change selection or send packets.
             _ => throw new InvalidOperationException($"Unexpected client call: {method.Name}")
         };
-        bool visible = true;
-        int toggles = 0;
-        Action toggle = () => { visible = !visible; toggles++; };
+        int opens = 0;
+        Action openSettings = () => opens++;
         Type controllerType = typeof(OpenHandModSystem).Assembly.GetType(
             "OpenHand.Client.OpenHandClientController", throwOnError: true)!;
         using IDisposable controller = (IDisposable)Activator.CreateInstance(
-            controllerType, api, toggle, (Func<bool>)(() => visible))!;
+            controllerType, api, openSettings, (Func<bool>)(() => true))!;
         HotKey indicator = hotkeys["openhand.indicator"];
         HotKey select = hotkeys["openhand.select"];
         KeyEvent ctrlTilde = new() { KeyCode = (int)GlKeys.Tilde, CtrlPressed = true };
@@ -77,14 +76,14 @@ internal static class ClientHotkeyTests
             select.DidPress(ctrlTilde, null!, null!, true) ||
             !select.DidPress(tilde, null!, null!, true))
             throw new InvalidOperationException("Hotkey modifiers or character-control gating differ");
-        if (!indicator.Handler(indicator.CurrentMapping) || visible || toggles != 1)
-            throw new InvalidOperationException("Indicator hotkey did not consume and toggle");
+        if (!indicator.Handler(indicator.CurrentMapping) || opens != 1)
+            throw new InvalidOperationException("Settings hotkey did not consume and open");
         indicator.Handler(indicator.CurrentMapping);
-        if (!visible || toggles != 2) throw new InvalidOperationException("Second press did not restore visibility");
+        if (opens != 2) throw new InvalidOperationException("Second press did not reach the dialog toggle");
         controller.Dispose();
         indicator.Handler(indicator.CurrentMapping);
-        if (toggles != 2 || subscriptions != 0)
+        if (opens != 2 || subscriptions != 0)
             throw new InvalidOperationException("Controller cleanup left an active callback or subscription");
-        Console.WriteLine("Passed indicator hotkey registration, modifiers, callback isolation, and disposal checks.");
+        Console.WriteLine("Passed settings hotkey registration, modifiers, callback isolation, and disposal checks.");
     }
 }

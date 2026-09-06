@@ -46,6 +46,12 @@ internal static class HudHotbarPatch
     private static ContinuousHotbarBackground? continuousBackground;
     private static GuiComposer? failedBackgroundComposer;
     private static bool loggedBackgroundFailure;
+    private static bool centeringHooksAvailable;
+    private static HotbarCenteringLayout? centeredLayout;
+    private static GuiComposer? centeringBlockedComposer;
+    private static string centeringStatus = "off";
+
+    internal static int CenteringOffsetX => centeredLayout?.Shift ?? 0;
 
     // Client config (openhand.json); defaults until StartClientSide loads the
     // real file. Client-only by definition, mirroring the ClientApi singleton.
@@ -71,10 +77,46 @@ internal static class HudHotbarPatch
         loggedProbeFailure = false;
         loggedBackgroundFailure = false;
         failedBackgroundComposer = null;
+        ResetCentering();
+        centeringBlockedComposer = null;
         if (!config.ShowIndicator || anchorMode != IconAnchorMode.Auto)
         {
             DetachContinuousBackground();
         }
+    }
+
+    [HarmonyPriority(Priority.Last)]
+    private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+    {
+        List<CodeInstruction> original = instructions.ToList();
+        try
+        {
+            List<CodeInstruction> rewritten = HotbarCenteringTranspiler.Rewrite(
+                original,
+                AccessTools.Method(typeof(HudHotbarPatch), nameof(PrepareHud)),
+                AccessTools.Method(typeof(HudHotbarPatch), nameof(RenderSkill)),
+                out centeringHooksAvailable);
+            if (!centeringHooksAvailable)
+                OpenHandModSystem.ClientApi?.Logger.Warning(
+                    "Open Hand centering hooks did not match this hotbar render method; centering is disabled.");
+            return rewritten;
+        }
+        catch (Exception exception)
+        {
+            centeringHooksAvailable = false;
+            OpenHandModSystem.ClientApi?.Logger.Warning(
+                "Open Hand skipped centering hooks; keeping uncentered rendering: {0}", exception.Message);
+            return original;
+        }
+    }
+
+    private static void RenderSkill(ISkillItemRenderer renderer, float dt, float x, float y, float z, object instance)
+    {
+        // Keep the item's own renderer and all its parameters except X.
+        int shift = instance is GuiDialog dialog &&
+                    ReferenceEquals(dialog.Composers["hotbar"], extendedComposer)
+            ? CenteringOffsetX : 0;
+        renderer.Render(dt, x + shift, y, z);
     }
 
     internal static string DescribeIconPlacement()
@@ -82,7 +124,9 @@ internal static class HudHotbarPatch
         return $"indicator={(config.ShowIndicator ? "on" : "off")} " +
             $"{anchorMode.ToString().ToLowerInvariant()} offset=({config.IconOffsetX},{config.IconOffsetY}) | " +
             $"last render: {lastPlacementDescription} | " +
-            $"background={(continuousBackground is null ? "vanilla" : $"continuous +{continuousBackground.ExtensionWidth}px")}";
+            $"background={(continuousBackground is null ? "vanilla" : $"continuous +{continuousBackground.ExtensionWidth}px")} | " +
+            $"centering={(config.CenterHotbar ? "requested" : "off")} shift={CenteringOffsetX}px " +
+            $"hooks={(centeringHooksAvailable ? "ready" : "unavailable")} ({centeringStatus})";
     }
 
     internal static MethodBase? TargetMethod()
@@ -107,10 +151,18 @@ internal static class HudHotbarPatch
     internal static void OnLeftWorld()
     {
         DetachContinuousBackground(recompose: false);
+        centeringBlockedComposer = null;
         ResetIconTexture();
     }
 
     private static void Prefix(object __instance)
+    {
+        // The verified hook prepares the current composer AFTER vanilla's
+        // internal rebuild. Keep the established prefix as the no-hook fallback.
+        if (!centeringHooksAvailable) PrepareHud(__instance);
+    }
+
+    private static void PrepareHud(object __instance)
     {
         ICoreClientAPI? capi = OpenHandModSystem.ClientApi;
         if (capi is null ||
@@ -118,6 +170,7 @@ internal static class HudHotbarPatch
             grid.SlotBounds is not { Length: > 0 } slotBounds ||
             slotBounds[0] is null)
         {
+            ResetCentering("hotbar unavailable");
             return;
         }
 
@@ -133,6 +186,7 @@ internal static class HudHotbarPatch
         {
             UpdateContinuousBackground(capi, __instance, x, y, size,
                 config.ShowIndicator && drawHotbarExtension);
+            UpdateCentering(capi, __instance, grid, y, size);
         }
         catch (Exception exception)
         {
@@ -145,6 +199,170 @@ internal static class HudHotbarPatch
         {
             grid.RemoveSlotHighlight();
         }
+    }
+
+    internal static void ResetCentering(string reason = "off")
+    {
+        centeredLayout?.Restore(GuiElement.scaled(1));
+        centeredLayout = null;
+        centeringStatus = reason;
+    }
+
+    private static void UpdateCentering(ICoreClientAPI api, object instance,
+        GuiElementItemSlotGridBase grid, int rowY, int size)
+    {
+        if (!config.CenterHotbar || !config.ShowIndicator || anchorMode != IconAnchorMode.Auto)
+        {
+            ResetCentering(!config.CenterHotbar ? "off" : "requires visible automatic indicator");
+            return;
+        }
+        if (!centeringHooksAvailable)
+        {
+            ResetCentering("render hooks unavailable");
+            return;
+        }
+        if (instance is not GuiDialog dialog || extendedComposer is not GuiComposer composer ||
+            !ReferenceEquals(dialog.Composers["hotbar"], composer) || continuousBackground is null)
+        {
+            ResetCentering("compatible continuous background unavailable");
+            return;
+        }
+        if (api.World.Player.WorldData.CurrentGameMode == EnumGameMode.Spectator ||
+            !composer.Enabled || api.Render.FrameWidth <= 0 || api.Render.FrameHeight <= 0)
+        {
+            ResetCentering("HUD not visible");
+            return;
+        }
+        if (ReferenceEquals(composer, centeringBlockedComposer))
+        {
+            ResetCentering("another layout writer; toggle centering to retry");
+            return;
+        }
+
+        ElementBounds root = composer.Bounds;
+        ElementBounds? gear = composer.GetElement("tempStabHoverText")?.Bounds;
+        ElementBounds? text = composer.GetElement("iteminfoHover")?.Bounds;
+        double scale = GuiElement.scaled(1);
+        if (centeredLayout is not null &&
+            (!ReferenceEquals(centeredLayout.Bounds, root) ||
+             !centeredLayout.IsIntact(scale) ||
+             (gear is not null && !centeredLayout.HasAnchor(gear)) ||
+             text is null || !centeredLayout.HasAnchor(text)))
+        {
+            centeringBlockedComposer = composer;
+            ResetCentering("layout ownership changed; toggle centering to retry");
+            return;
+        }
+
+        // Respect non-centered/custom-position hotbars rather than overriding
+        // another mod's explicit placement. Unknown virtual bounds may compute
+        // coordinates without inheriting their parent's offsets.
+        double baseX = root.renderX - (centeredLayout?.CurrentShift(scale) ?? 0);
+        if (root.GetType() != typeof(ElementBounds) ||
+            !IsScreenParent(root.ParentBounds, api.Gui.WindowBounds.GetType(),
+                api.Render.FrameWidth, api.Render.FrameHeight) ||
+            root.Alignment != EnumDialogArea.CenterBottom ||
+            root.horizontalSizing != ElementSizing.Fixed ||
+            root.renderOffsetX != 0 ||
+            Math.Abs(baseX + root.OuterWidth / 2 - api.Render.FrameWidth / 2.0) > 1 ||
+            text is null || !RecognizedChild(text, root) ||
+            (gear is not null && !RecognizedChild(gear, root)) ||
+            !RecognizedChild(grid.Bounds, root))
+        {
+            ResetCentering("unsupported or independently positioned bounds");
+            return;
+        }
+        if (ComposerStaticElementsField?.GetValue(composer) is not Dictionary<string, GuiElement> elements)
+        {
+            ResetCentering("element probe unavailable");
+            return;
+        }
+        foreach (GuiElement element in elements.Values)
+        {
+            if (element is not GuiElementItemSlotGridBase slotGrid) continue;
+            if (!RecognizedChild(slotGrid.Bounds, root) || slotGrid.SlotBounds is null)
+            {
+                ResetCentering("independently positioned slot grid");
+                return;
+            }
+            foreach (ElementBounds bounds in slotGrid.SlotBounds)
+            {
+                if (bounds is null || !RecognizedChild(bounds, root))
+                {
+                    ResetCentering("independently positioned slot bounds");
+                    return;
+                }
+            }
+        }
+
+        int left = (int)baseX - continuousBackground.ExtensionWidth;
+        int right = (int)baseX + root.OuterWidthInt;
+        if ((long)right - left > api.Render.FrameWidth)
+        {
+            ResetCentering("combined bar is wider than the viewport");
+            return;
+        }
+        int shift = OpenHandCenteringGeometry.Shift(api.Render.FrameWidth, left, right);
+        if (OverlapsExternalHud(api, composer, rowY, size, left + shift, right + shift))
+        {
+            ResetCentering("independent HUD cells occupy the centered area");
+            return;
+        }
+        centeredLayout ??= gear is null
+            ? new HotbarCenteringLayout(root, text)
+            : new HotbarCenteringLayout(root, gear, text);
+        if (!centeredLayout.Apply(shift, scale))
+        {
+            centeringBlockedComposer = composer;
+            ResetCentering("layout ownership changed; toggle centering to retry");
+            return;
+        }
+        centeringStatus = "active";
+    }
+
+    private static bool IsScreenParent(ElementBounds? bounds, Type windowType, int width, int height)
+    {
+        // VS 1.22.7 GuiAPI.WindowBounds returns new ElementWindowBounds()
+        // each time. Compare its type and viewport geometry, not identity:
+        // reference equality would reject every vanilla HUD.
+        return bounds is not null && bounds.GetType() == windowType &&
+               bounds.absX == 0 && bounds.absY == 0 &&
+               bounds.renderX == 0 && bounds.renderY == 0 &&
+               bounds.InnerWidth == width && bounds.InnerHeight == height &&
+               bounds.OuterWidth == width && bounds.OuterHeight == height;
+    }
+
+    private static bool RecognizedChild(ElementBounds bounds, ElementBounds root)
+    {
+        // Bounded walk also fails safely for malformed/cyclic mod layouts.
+        for (int depth = 0; depth < 64; depth++)
+        {
+            if (ReferenceEquals(bounds, root)) return true;
+            if (bounds.GetType() != typeof(ElementBounds) || bounds.renderOffsetX != 0 ||
+                bounds.ParentBounds is null) return false;
+            bounds = bounds.ParentBounds;
+        }
+        return false;
+    }
+
+    private static bool OverlapsExternalHud(ICoreClientAPI api, GuiComposer own,
+        int rowY, int size, int left, int right)
+    {
+        if (ComposerStaticElementsField is null) return true;
+        RowIntervals.Clear();
+        foreach (GuiDialog dialog in api.Gui.LoadedGuis)
+        {
+            if (dialog is not HudElement || !dialog.IsOpened()) continue;
+            foreach (GuiComposer composer in dialog.Composers.Values)
+            {
+                if (!composer.Enabled || ReferenceEquals(composer, own) ||
+                    ReferenceEquals(composer.Bounds, own.Bounds)) continue;
+                CollectRowIntervals(composer, ComposerStaticElementsField, rowY, size);
+            }
+        }
+        foreach ((int start, int end) in RowIntervals)
+            if (OpenHandCenteringGeometry.Overlaps(left, right, start, end)) return true;
+        return false;
     }
 
     private static void UpdateContinuousBackground(
@@ -204,6 +422,7 @@ internal static class HudHotbarPatch
 
     internal static void DetachContinuousBackground(bool recompose = true)
     {
+        ResetCentering();
         GuiComposer? composer = extendedComposer;
         ContinuousHotbarBackground? background = continuousBackground;
         extendedComposer = null;
