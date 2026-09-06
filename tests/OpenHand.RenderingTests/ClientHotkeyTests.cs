@@ -65,7 +65,7 @@ internal static class ClientHotkeyTests
         Type controllerType = typeof(OpenHandModSystem).Assembly.GetType(
             "OpenHand.Client.OpenHandClientController", throwOnError: true)!;
         using IDisposable controller = (IDisposable)Activator.CreateInstance(
-            controllerType, api, openSettings, (Func<bool>)(() => true))!;
+            controllerType, api, openSettings, (Func<bool>)(() => true), (Func<bool>)(() => false))!;
         HotKey indicator = hotkeys["openhand.indicator"];
         HotKey select = hotkeys["openhand.select"];
         KeyEvent ctrlTilde = new() { KeyCode = (int)GlKeys.Tilde, CtrlPressed = true };

@@ -38,7 +38,8 @@ public sealed class OpenHandModSystem : ModSystem
         ApplyClientConfig(api);
         clientController = new OpenHandClientController(
             api, () => ToggleSettingsDialog(api),
-            () => clientConfig.ShowIndicator);
+            () => clientConfig.ShowIndicator,
+            () => clientConfig.DoubleTapHotbarKey);
         ReportClientConflicts();
 
         // GL texture IDs change across world transitions and texture reloads;
@@ -208,6 +209,26 @@ public sealed class OpenHandModSystem : ModSystem
         return TextCommandResult.Success(message);
     }
 
+    // Double-tap affects only the client controller's enabled check, which
+    // reads the live config, so no runtime push is needed here.
+    private TextCommandResult SetDoubleTap(bool enabled)
+    {
+        clientConfig.DoubleTapHotbarKey = enabled;
+        string message = enabled
+            ? "Open Hand double-tap enabled: pressing the active slot's number key selects the empty hand."
+            : "Open Hand double-tap disabled.";
+        try
+        {
+            ClientApi?.StoreModConfig(clientConfig, OpenHandClientConfig.ConfigFileName);
+        }
+        catch (Exception exception)
+        {
+            Mod.Logger.Error("Open Hand double-tap preference could not be saved: {0}", exception.Message);
+            message += " The setting could not be saved.";
+        }
+        return TextCommandResult.Success(message);
+    }
+
     // Generic conflict detection: WHO patches the methods Open Hand relies on
     // (via Harmony patch ownership), never WHAT mod it is. Behavior never
     // branches on these names; they only shape warning text.
@@ -357,6 +378,21 @@ public sealed class OpenHandModSystem : ModSystem
             .BeginSubCommand("toggle")
             .WithDescription("Toggles the saved hotbar centering preference")
             .HandleWith(_ => SetHotbarCentering(api, !clientConfig.CenterHotbar))
+            .EndSubCommand()
+            .EndSubCommand()
+            .BeginSubCommand("doubletap")
+            .WithDescription("Controls re-tap hotbar slot key entry into Open Hand")
+            .BeginSubCommand("on")
+            .WithDescription("Selects Open Hand when the active slot's number key is pressed again")
+            .HandleWith(_ => SetDoubleTap(true))
+            .EndSubCommand()
+            .BeginSubCommand("off")
+            .WithDescription("Restores vanilla same-slot key behavior")
+            .HandleWith(_ => SetDoubleTap(false))
+            .EndSubCommand()
+            .BeginSubCommand("toggle")
+            .WithDescription("Toggles the saved double-tap preference")
+            .HandleWith(_ => SetDoubleTap(!clientConfig.DoubleTapHotbarKey))
             .EndSubCommand()
             .EndSubCommand();
     }

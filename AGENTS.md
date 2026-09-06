@@ -120,6 +120,29 @@ rejects other formats ("The NetworkVersion of this mod ... is malformed").
   build locally with `scripts/package.py`, and attach the zip to the GitHub release.
   The Release workflow fails if the tag does not match the modinfo version.
 
+## Local test instance
+
+A private Vintage Story test instance lives outside this repo at `~/code/vs-testing/`
+(its `launch-test.sh` documents the layout):
+
+- `game/` — copied game install, launched directly via `~/code/vs-testing/launch-test.sh`
+- `xdg/VintagestoryData/Mods/` — the instance's mod folder. `game/Mods/` is vanilla-only
+  (`do_not_add_mods_here.txt` says so); mods must go in the XDG data folder.
+- `tmp/` — private TMPDIR so the game's URI-scheme named pipe never collides with the
+  main Flatpak install
+
+Deploy the current build to the test instance (run from the repo root):
+
+```bash
+python3 scripts/package.py
+cp artifacts/openhand_<version>.zip ~/code/vs-testing/xdg/VintagestoryData/Mods/
+```
+
+Overwriting the existing `openhand_*.zip` in place is fine; the game picks it up on the
+next launch. The zip name follows the modinfo version, so an unreleased feature build
+overwrites the same `openhand_<version>.zip` as the published release. Never deploy to
+the main (Flatpak) install's mod folder from this repo's workflow.
+
 ## Validation expectations
 
 - State tests must pass before any merge.

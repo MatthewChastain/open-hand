@@ -22,13 +22,19 @@ internal sealed class OpenHandClientController : IDisposable
     private readonly ICoreClientAPI capi;
     private readonly IClientNetworkChannel channel;
     private readonly Func<bool> isIndicatorVisible;
+    private readonly Func<bool> isDoubleTapEnabled;
     private int nextRevision;
     private bool disposed;
 
-    public OpenHandClientController(ICoreClientAPI capi, Action openSettings, Func<bool> isIndicatorVisible)
+    public OpenHandClientController(
+        ICoreClientAPI capi,
+        Action openSettings,
+        Func<bool> isIndicatorVisible,
+        Func<bool> isDoubleTapEnabled)
     {
         this.capi = capi;
         this.isIndicatorVisible = isIndicatorVisible;
+        this.isDoubleTapEnabled = isDoubleTapEnabled;
         channel = capi.Network.RegisterChannel(ChannelName)
             .RegisterMessageType<OpenHandSelectionRequest>()
             .RegisterMessageType<OpenHandSelectionUpdate>()
@@ -64,7 +70,77 @@ internal sealed class OpenHandClientController : IDisposable
 
         capi.Event.MouseWheelMove += OnMouseWheelMove;
         capi.Event.BeforeActiveSlotChanged += OnBeforeActiveSlotChanged;
+        capi.Event.KeyDown += OnKeyDown;
         capi.Event.LeftWorld += OnLeftWorld;
+    }
+
+    // Vanilla's hotbarslot1-10 handlers return true and the hotkey dispatcher
+    // stops at the first handler that does, so Open Hand hotkeys registered on
+    // the same keys would never fire. The KeyDown event reaches mod listeners
+    // before hotkey dispatch (verified against Vintage Story 1.22.7
+    // ClientMain.OnKeyDown), and leaving args.Handled untouched keeps vanilla's
+    // own handling of the press intact.
+    private void OnKeyDown(KeyEvent args)
+    {
+        bool enabled = isDoubleTapEnabled();
+        if (args.Handled || !enabled)
+        {
+            return;
+        }
+
+        IClientPlayer? player = capi.World?.Player;
+        if (player is null || DialogsCaptureInputs())
+        {
+            return;
+        }
+
+        // With a slot hovered (inventory open), vanilla turns a number press
+        // into a swap with that slot; never select Open Hand on top of it.
+        if (player.InventoryManager.CurrentHoveredSlot is not null)
+        {
+            return;
+        }
+
+        int? requestedSlot = SlotForKeyEvent(args);
+        if (requestedSlot is null)
+        {
+            return;
+        }
+
+        OpenHandDoubleTap.DoubleTapDecision decision = OpenHandDoubleTap.Resolve(
+            OpenHandRuntime.IsSelected(player),
+            player.InventoryManager.ActiveHotbarSlotNumber,
+            requestedSlot.Value,
+            enabled);
+        switch (decision.Action)
+        {
+            case OpenHandDoubleTap.DoubleTapAction.Enter:
+                SelectOpenHand(player);
+                break;
+            case OpenHandDoubleTap.DoubleTapAction.ExitToSlot:
+                DeselectToSlot(player, decision.Destination);
+                break;
+        }
+    }
+
+    // Resolve the press against vanilla's own hotbarslot bindings so user
+    // rebinds are honored; modifier variants such as the Ctrl backpack-slot
+    // keys never match their unmodified mapping.
+    private int? SlotForKeyEvent(KeyEvent args)
+    {
+        for (int slot = 0; slot < OpenHandSelectionState.PhysicalHotbarSlots; slot++)
+        {
+            if (capi.Input.HotKeys.TryGetValue($"hotbarslot{slot + 1}", out HotKey? hotkey) &&
+                hotkey.CurrentMapping.KeyCode == args.KeyCode &&
+                hotkey.CurrentMapping.Alt == args.AltPressed &&
+                hotkey.CurrentMapping.Ctrl == args.CtrlPressed &&
+                hotkey.CurrentMapping.Shift == args.ShiftPressed)
+            {
+                return slot;
+            }
+        }
+
+        return null;
     }
 
     private void SelectOpenHand(IClientPlayer player)
@@ -163,12 +239,9 @@ internal sealed class OpenHandClientController : IDisposable
     /// </summary>
     private bool WheelWouldReachHotbar()
     {
-        foreach (GuiDialog openedDialog in capi.Gui.OpenedGuis)
+        if (DialogsCaptureInputs())
         {
-            if (openedDialog.CaptureAllInputs())
-            {
-                return false;
-            }
+            return false;
         }
 
         foreach (GuiDialog loadedDialog in capi.Gui.LoadedGuis)
@@ -192,6 +265,22 @@ internal sealed class OpenHandClientController : IDisposable
         }
 
         return true;
+    }
+
+    // Chat and other capture dialogs swallow the press upstream in
+    // ClientMain.OnKeyDown, but the KeyDown event itself fires first, so the
+    // double-tap listener has to apply the same filter itself.
+    private bool DialogsCaptureInputs()
+    {
+        foreach (GuiDialog openedDialog in capi.Gui.OpenedGuis)
+        {
+            if (openedDialog.CaptureAllInputs())
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsHotbarSlotEmpty(IClientPlayer player, int slotIndex)
@@ -254,6 +343,7 @@ internal sealed class OpenHandClientController : IDisposable
         disposed = true;
         capi.Event.MouseWheelMove -= OnMouseWheelMove;
         capi.Event.BeforeActiveSlotChanged -= OnBeforeActiveSlotChanged;
+        capi.Event.KeyDown -= OnKeyDown;
         capi.Event.LeftWorld -= OnLeftWorld;
         capi.Input.SetHotKeyHandler(SelectHotKeyCode, _ => true);
         capi.Input.SetHotKeyHandler(IndicatorHotKeyCode, _ => true);
