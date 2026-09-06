@@ -9,6 +9,7 @@ internal sealed class OpenHandClientController : IDisposable
 {
     private const string ChannelName = "openhand";
     private const string SelectHotKeyCode = "openhand.select";
+    private const string IndicatorHotKeyCode = "openhand.indicator";
 
     // Verified against Vintage Story 1.22.7 (InventoryPlayerHotbar):
     // slot 10 is the skill slot, slot 11 is the offhand, and the vanilla wheel
@@ -20,12 +21,14 @@ internal sealed class OpenHandClientController : IDisposable
 
     private readonly ICoreClientAPI capi;
     private readonly IClientNetworkChannel channel;
+    private readonly Func<bool> isIndicatorVisible;
     private int nextRevision;
     private bool disposed;
 
-    public OpenHandClientController(ICoreClientAPI capi)
+    public OpenHandClientController(ICoreClientAPI capi, Action toggleIndicator, Func<bool> isIndicatorVisible)
     {
         this.capi = capi;
+        this.isIndicatorVisible = isIndicatorVisible;
         channel = capi.Network.RegisterChannel(ChannelName)
             .RegisterMessageType<OpenHandSelectionRequest>()
             .RegisterMessageType<OpenHandSelectionUpdate>()
@@ -44,6 +47,18 @@ internal sealed class OpenHandClientController : IDisposable
                 SelectOpenHand(player);
             }
 
+            return true;
+        });
+
+        capi.Input.RegisterHotKey(
+            IndicatorHotKeyCode,
+            "Toggle Open Hand indicator",
+            GlKeys.Tilde,
+            HotkeyType.CharacterControls,
+            ctrlPressed: true);
+        capi.Input.SetHotKeyHandler(IndicatorHotKeyCode, _ =>
+        {
+            toggleIndicator();
             return true;
         });
 
@@ -125,7 +140,8 @@ internal sealed class OpenHandClientController : IDisposable
             player.InventoryManager.ActiveHotbarSlotNumber,
             skillOccupied,
             capi.Input.KeyboardKeyStateRaw[BackpackModeRawKey],
-            args.delta);
+            args.delta,
+            allowEntry: isIndicatorVisible());
 
         switch (decision.Action)
         {
@@ -240,6 +256,7 @@ internal sealed class OpenHandClientController : IDisposable
         capi.Event.BeforeActiveSlotChanged -= OnBeforeActiveSlotChanged;
         capi.Event.LeftWorld -= OnLeftWorld;
         capi.Input.SetHotKeyHandler(SelectHotKeyCode, _ => true);
+        capi.Input.SetHotKeyHandler(IndicatorHotKeyCode, _ => true);
         OpenHandRuntime.ClearAll();
     }
 }

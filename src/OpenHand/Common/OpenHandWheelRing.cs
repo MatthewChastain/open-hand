@@ -4,8 +4,8 @@ namespace OpenHand.Common;
 /// Pure decision logic for the Open Hand wheel ring. The vanilla ring (verified
 /// against Vintage Story 1.22.7 HudHotbar.moveToHotbarSlot) spans hotbar slots
 /// 0-9 plus the skill slot at index 10 while it is occupied; the offhand at
-/// index 11 is never part of the wheel. Open Hand sits immediately before slot
-/// 0, mirroring its HUD position between the offhand box and slot 0.
+/// index 11 is never part of the wheel. When wheel entry is enabled, Open Hand
+/// sits immediately before slot 0.
 /// </summary>
 public static class OpenHandWheelRing
 {
@@ -30,12 +30,14 @@ public static class OpenHandWheelRing
     /// <param name="skillOccupied">Whether the skill slot (hotbar index 10) holds an item.</param>
     /// <param name="backpackMode">Whether the vanilla backpack-mode key is held.</param>
     /// <param name="wheelDelta">Raw wheel delta; negative scrolls forward down the ring.</param>
+    /// <param name="allowEntry">Whether scrolling may enter Open Hand; does not prevent wheel exit.</param>
     public static WheelDecision Resolve(
         bool isSelected,
         int activeSlot,
         bool skillOccupied,
         bool backpackMode,
-        int wheelDelta)
+        int wheelDelta,
+        bool allowEntry = true)
     {
         if (backpackMode || wheelDelta == 0)
         {
@@ -50,6 +52,11 @@ public static class OpenHandWheelRing
                     ? SkillSlotIndex
                     : OpenHandSelectionState.PhysicalHotbarSlots - 1;
             return new(WheelAction.ExitToSlot, destination);
+        }
+
+        if (!allowEntry)
+        {
+            return new(WheelAction.None, activeSlot);
         }
 
         bool entersFromLastSlot = activeSlot == OpenHandSelectionState.PhysicalHotbarSlots - 1 &&
