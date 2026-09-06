@@ -4,7 +4,7 @@ An always-empty hand option for the discerning adventurer.
 
 Adds a virtual, always-empty main-hand selection to Vintage Story. It is not an inventory slot: it cannot be filled, moved, saved, crafted into, or targeted by inventory automation. Install on both the client and the server — grab the latest release from the [releases page](https://github.com/MatthewChastain/open-hand/releases/latest).
 
-The client adds a wheel entry and hotkey, an optional HUD indicator that blends into the hotbar, opt-in hotbar centering with automatic fallbacks, and an in-game settings menu (Ctrl+tilde).
+The client adds a wheel entry and hotkey, an optional HUD indicator that blends into the hotbar, hotbar centering with automatic fallbacks, and an in-game settings menu (Ctrl+tilde).
 
 ## Supported versions
 
@@ -30,9 +30,9 @@ While Open Hand is selected the engine resolves the main hand as empty. The ten 
 
 Both indicator and centering settings are also in the settings menu, which applies and saves every change immediately.
 
-## Optional hotbar centering
+## Hotbar centering
 
-Centering is **off by default**. Enable it with the **Center hotbar** switch in the settings menu (Ctrl+tilde) or `.openhand center on`; both write the saved `CenterHotbar` preference in `openhand.json`.
+Centering is **on by default**. Disable it with the **Center hotbar** switch in the settings menu (Ctrl+tilde) or `.openhand center off`; both write the saved `CenterHotbar` preference in `openhand.json`.
 
 When the indicator is visible and `IconAnchor` is `auto`, compatible hotbars are centered together with the Open Hand extension. Slots and their click targets move together; the skill icon follows the slots, while the temporal gear, its hover target, and item-name text stay screen-centered. Hiding the indicator restores the original hotbar position without clearing the centering preference.
 
@@ -47,7 +47,7 @@ All client settings live in `openhand.json` under the game's `ModConfig` folder 
 - `IconAnchor` — where the indicator cell attaches: `auto` (a compatible external panel left of the hotbar), `offhandGap` (the classic but vanilla-reserved position), `left`, or `right` of the row.
 - `IconOffsetX` / `IconOffsetY` — final pixel nudges applied after the anchor resolves (settings menu steppers clamp to ±100).
 - `ShowIndicator` — whether the HUD panel, hand cell, and selection outline render. When disabled, entry is hotkey-only; wheel exit and server synchronization are unchanged.
-- `CenterHotbar` — opt-in centering described above; unsupported layouts remain uncentered.
+- `CenterHotbar` — centering described above, on by default; unsupported layouts remain uncentered.
 
 ## Branching & releases
 
@@ -80,7 +80,7 @@ The optional local API/render regression suite requires the game installation an
 
 ## Compatibility
 
-Do not run alongside Forever Empty; both mods modify selected-hand behavior, and Open Hand warns about the conflict on startup. Mods that cache or alter `ActiveHotbarSlot` directly may need compatibility work — open an issue with a minimal reproduction and your Vintage Story version.
+Do not run alongside Forever Empty; both mods modify selected-hand behavior, and Open Hand warns about the conflict on startup. Overhaul lib legacy compat works as of 1.0.0: the substituted hand slot now satisfies vanilla slot contracts (`Inventory` is always populated), which that mod's per-tick hand checks rely on. Mods that cache or alter `ActiveHotbarSlot` directly may still need compatibility work — open an issue with a minimal reproduction and your Vintage Story version.
 
 ## Contributing
 

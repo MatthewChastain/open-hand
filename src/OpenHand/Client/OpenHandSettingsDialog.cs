@@ -135,7 +135,7 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
             c.IconOffsetX = 0;
             c.IconOffsetY = 0;
             c.ShowIndicator = true;
-            c.CenterHotbar = false;
+            c.CenterHotbar = true;
         });
         Composers.ClearComposers();
         ComposeDialog();

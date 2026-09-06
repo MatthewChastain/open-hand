@@ -20,7 +20,7 @@ internal static class ActiveHandPatch
     {
         if (PlayerField?.GetValue(__instance) is IPlayer player && OpenHandRuntime.IsSelected(player))
         {
-            __result = OpenHandRuntime.EmptySlot;
+            __result = OpenHandRuntime.EmptySlotFor(player);
         }
     }
 }

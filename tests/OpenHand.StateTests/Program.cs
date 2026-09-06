@@ -189,7 +189,7 @@ Equal(true, OpenHandClientConfig.IsKnownIconAnchor("offhandgap"), "known anchor"
 Equal(false, OpenHandClientConfig.IsKnownIconAnchor("nope"), "unknown anchor");
 Equal(false, OpenHandClientConfig.IsKnownIconAnchor(null), "null anchor");
 Equal(true, new OpenHandClientConfig().ShowIndicator, "indicator defaults on");
-Equal(false, new OpenHandClientConfig().CenterHotbar, "centering defaults off");
+Equal(true, new OpenHandClientConfig().CenterHotbar, "centering defaults on");
 Equal(false, new OpenHandClientConfig { ShowIndicator = false }.ShowIndicator, "indicator can be disabled");
 
 static void Gap(

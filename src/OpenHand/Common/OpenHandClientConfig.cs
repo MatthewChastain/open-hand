@@ -31,9 +31,10 @@ public sealed class OpenHandClientConfig
 
     /// <summary>
     /// Center a recognized hotbar together with its visible automatic extension.
-    /// Unsupported layouts remain uncentered. Disabled by default.
+    /// Unsupported layouts remain uncentered. Enabled by default; fallback
+    /// placement is automatic whenever the layout is not compatible.
     /// </summary>
-    public bool CenterHotbar { get; set; }
+    public bool CenterHotbar { get; set; } = true;
 
     /// <summary>Parses the anchor setting; unknown values resolve to Auto.</summary>
     public static IconAnchorMode ParseIconAnchor(string? value)
