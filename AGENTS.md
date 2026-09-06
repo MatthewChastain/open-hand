@@ -36,7 +36,7 @@ warning-free under `net10.0` with nullable enabled.
 
 - `src/OpenHand/OpenHandModSystem.cs` — mod entry point: applies Harmony patches, registers the `/openhand status` command
 - `src/OpenHand/Common/` — shared runtime state (`OpenHandRuntime`, wheel-ring order)
-- `src/OpenHand/Client/` — hotkey registration, wheel input, HUD icon rendering
+- `src/OpenHand/Client/` — hotkey registration, wheel input, HUD icon rendering, in-game settings dialog
 - `src/OpenHand/Server/` — server authority and selection broadcast
 - `src/OpenHand/Patches/` — the only two Harmony patches in the mod
 - `src/OpenHand/modinfo.json` — the authoritative mod manifest (see Packaging)
@@ -73,6 +73,14 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   manipulating bitmaps.
 - **The server is authoritative.** Selection state is validated server-side and
   broadcast; the client never trusts its own selection in multiplayer.
+- **Centering is opt-in and reversible.** It adds owned layout offsets, not
+  render-only shifts. Gear hover and item-name bounds counter-offset the root.
+  A guarded transpiler on the existing `HudHotbar.OnRenderGUI` target prepares
+  after vanilla rebuilds and adjusts only the skill renderer's X argument.
+  If either hook is unavailable, centering stays off. Preserve foreign bounds
+  writes and yield rather than repeatedly overriding another mod's layout.
+- **Patch registration must be idempotent.** Client and server startup can share
+  a process; registering the same Harmony patch twice duplicates draw calls.
 
 ## Compatibility policy
 

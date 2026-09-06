@@ -189,6 +189,7 @@ Equal(true, OpenHandClientConfig.IsKnownIconAnchor("offhandgap"), "known anchor"
 Equal(false, OpenHandClientConfig.IsKnownIconAnchor("nope"), "unknown anchor");
 Equal(false, OpenHandClientConfig.IsKnownIconAnchor(null), "null anchor");
 Equal(true, new OpenHandClientConfig().ShowIndicator, "indicator defaults on");
+Equal(false, new OpenHandClientConfig().CenterHotbar, "centering defaults off");
 Equal(false, new OpenHandClientConfig { ShowIndicator = false }.ShowIndicator, "indicator can be disabled");
 
 static void Gap(
@@ -225,3 +226,15 @@ Equal(0, OpenHandHudGeometry.ExtensionWidth(100, 120, 13), "no extension for ins
 Equal(11, OpenHandHudGeometry.ExtensionWidth(100, 102, 13), "extend only exposed padding");
 
 Console.WriteLine("OpenHandSelectionState, wheel ring, gap solver, config, and HUD geometry tests passed.");
+
+Equal(27, OpenHandCenteringGeometry.Shift(1920, 481, 1385), "center 54-pixel extension");
+Equal(26, OpenHandCenteringGeometry.Shift(1920, 482, 1385), "odd extension chooses left pixel");
+Equal(27, OpenHandCenteringGeometry.Shift(1921, 481, 1385), "odd viewport");
+Equal(-23, OpenHandCenteringGeometry.Shift(1920, 531, 1435), "measured position, not hardcoded offset");
+Equal(0, OpenHandCenteringGeometry.Shift(800, -100, 900), "oversized bar not centered");
+Equal(0, OpenHandCenteringGeometry.Shift(0, 10, 50), "minimized viewport");
+Equal(0, OpenHandCenteringGeometry.Shift(1920, 10, 10), "empty geometry");
+Equal(false, OpenHandCenteringGeometry.Overlaps(100, 200, 200, 250), "abutting HUD cells allowed");
+Equal(true, OpenHandCenteringGeometry.Overlaps(100, 200, 199, 250), "overlapping HUD cells rejected");
+Equal(false, OpenHandCenteringGeometry.Overlaps(100, 200, 120, 120), "empty external bounds");
+Console.WriteLine("Opt-in centering geometry and config tests passed.");

@@ -4,6 +4,8 @@ An always-empty hand option for the discerning adventurer.
 
 Adds a virtual, always-empty main-hand selection to Vintage Story. It is not an inventory slot: it cannot be filled, moved, saved, crafted into, or targeted by inventory automation. Install on both the client and the server — grab the latest release from the [releases page](https://github.com/MatthewChastain/open-hand/releases/latest).
 
+The client adds a wheel entry and hotkey, an optional HUD indicator that blends into the hotbar, opt-in hotbar centering with automatic fallbacks, and an in-game settings menu (Ctrl+tilde).
+
 ## Supported versions
 
 Built and tested against Vintage Story **1.22.7**, and the packaged mod declares the 1.22 line as a dependency (minimum 1.22.0). The Harmony patches target internal APIs verified against the decompiled 1.22.7 assemblies; the game API is stable across 1.22.x revisions, so any 1.22 release should work. Newer game versions may not work until the mod is re-verified — each release's notes state the supported game version.
@@ -11,16 +13,41 @@ Built and tested against Vintage Story **1.22.7**, and the packaged mod declares
 ## Controls
 
 - Tilde (rebindable under Settings → Controls → Movement & character controls as **Select Open Hand**) selects Open Hand. Press it again to jump back to the slot you had selected before entering it.
-- Ctrl + tilde toggles the visual indicator without changing your hand selection. Rebind it in the same controls category as **Toggle Open Hand indicator**. Visibility is saved in `openhand.json` and defaults to on.
+- Ctrl + tilde opens the Open Hand settings menu without changing your hand selection. Rebind it in the same controls category as **Open Open Hand settings**. The menu edits every client setting: the visual indicator, hotbar centering, the indicator's anchor position, and pixel offsets, plus a reset-to-defaults button. Changes apply and save immediately.
 - With the indicator hidden, scrolling skips Open Hand; use the **Select Open Hand** hotkey to activate it. You can still scroll out of Open Hand afterward. Showing the indicator restores wheel entry immediately.
 - With the indicator shown, the wheel ring runs `1` through `0`, then Open Hand, then back to `1`. Scroll down from the `0` slot — or from an occupied skill slot — or scroll up from the `1` slot to enter Open Hand.
 - Scroll once more to leave: down selects the `1` slot, up selects the `0` slot, or the skill slot while it holds an item.
 - Any number key or hotbar click leaves Open Hand.
 - Wheel scrolling works normally in dialogs and vanilla backpack mode.
-- `/openhand status` prints diagnostics: selection state, remembered slot, server revision, patch status.
-- `.openhand indicator on`, `.openhand indicator off`, and `.openhand indicator toggle` control the same saved visibility setting (use a period, not a slash).
 
 While Open Hand is selected the engine resolves the main hand as empty. The ten physical hotbar slots and the offhand are never touched.
+
+## Chat commands
+
+- `/openhand status` — diagnostics: selection state, remembered slot, server revision, applied/failed patches, indicator placement, centering shift and fallback reason, and any other mods patching the same targets.
+- `.openhand indicator on|off|toggle` — the saved indicator visibility (use a period, not a slash).
+- `.openhand center on|off|toggle` — the saved hotbar-centering preference.
+
+Both indicator and centering settings are also in the settings menu, which applies and saves every change immediately.
+
+## Optional hotbar centering
+
+Centering is **off by default**. Enable it with the **Center hotbar** switch in the settings menu (Ctrl+tilde) or `.openhand center on`; both write the saved `CenterHotbar` preference in `openhand.json`.
+
+When the indicator is visible and `IconAnchor` is `auto`, compatible hotbars are centered together with the Open Hand extension. Slots and their click targets move together; the skill icon follows the slots, while the temporal gear, its hover target, and item-name text stay screen-centered. Hiding the indicator restores the original hotbar position without clearing the centering preference.
+
+`.openhand status` reports the actual shift and why centering is inactive. Unsupported layouts, unavailable render hooks, overlapping independent HUD cells, or conflicting position changes fall back to uncentered placement. After another mod changes an owned offset, toggle centering off/on to retry. Compatibility with arbitrary custom renderers is not guaranteed; use `.openhand center off` if another mod's graphics do not follow the bar.
+
+For mod authors: renderers attached to the existing bounds tree already inherit the shift. Independently drawn, hotbar-attached graphics can read `OpenHandModSystem.HotbarCenteringOffsetX` during client rendering and add it to otherwise unshifted coordinates. Do not add it to bounds-derived coordinates or to the skill-render coordinates supplied by vanilla: those are already adjusted.
+
+## Configuration
+
+All client settings live in `openhand.json` under the game's `ModConfig` folder and can be edited from the settings menu. The file is created with defaults on first launch.
+
+- `IconAnchor` — where the indicator cell attaches: `auto` (a compatible external panel left of the hotbar), `offhandGap` (the classic but vanilla-reserved position), `left`, or `right` of the row.
+- `IconOffsetX` / `IconOffsetY` — final pixel nudges applied after the anchor resolves (settings menu steppers clamp to ±100).
+- `ShowIndicator` — whether the HUD panel, hand cell, and selection outline render. When disabled, entry is hotkey-only; wheel exit and server synchronization are unchanged.
+- `CenterHotbar` — opt-in centering described above; unsupported layouts remain uncentered.
 
 ## Branching & releases
 
@@ -44,6 +71,12 @@ The release archive is written to `artifacts/openhand_<version>.zip`, where `<ve
 ## Manual validation
 
 Before relying on the mod in a save, test a fully populated hotbar and offhand in single-player and multiplayer. Confirm that Open Hand shows the empty marker, does not alter any item stack, allows normal empty-hand interactions, and remains clean after returning to the main menu and entering another world in the same game process.
+
+For the settings menu, open it with Ctrl+tilde in a world, toggle both switches, change the anchor dropdown, nudge and reset the offsets, and confirm the values survive closing and reopening the menu (and the game).
+
+For centering, also test center/indicator toggles, slot clicking and hover targets, the occupied skill slot and its highlight, temporal-gear hover, window resizing, GUI-scale changes, texture reloads, and world transitions. Test other hotbar mods separately before claiming compatibility.
+
+The optional local API/render regression suite requires the game installation and is intentionally outside CI: `dotnet run --project tests/OpenHand.RenderingTests/OpenHand.RenderingTests.csproj -c Release`. It covers pixel composition, input registration, actual bounds/hitboxes, and guarded transpiler matching/compilation against the installed game.
 
 ## Compatibility
 

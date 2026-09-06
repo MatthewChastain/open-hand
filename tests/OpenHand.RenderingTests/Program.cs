@@ -175,6 +175,7 @@ finally
 if (deleted != cases) throw new InvalidOperationException("Texture disposal count mismatch");
 Console.WriteLine($"Passed {cases} continuous-background pixel comparisons, crop/upload, bounds, resize, and reload checks.");
 ClientHotkeyTests.Run();
+CenteringTests.Run();
 
 public class RecordingProxy : DispatchProxy
 {

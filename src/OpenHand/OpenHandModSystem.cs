@@ -16,8 +16,16 @@ public sealed class OpenHandModSystem : ModSystem
     private OpenHandClientController? clientController;
     private OpenHandServerController? serverController;
     private OpenHandClientConfig clientConfig = new();
+    private OpenHandSettingsDialog? settingsDialog;
 
     internal static ICoreClientAPI? ClientApi { get; private set; }
+
+    /// <summary>
+    /// Current hotbar centering translation in screen pixels, or zero when
+    /// inactive. Client renderers may add this to hotbar-attached coordinates.
+    /// Read during rendering; do not cache across frames or world transitions.
+    /// </summary>
+    public static int HotbarCenteringOffsetX => HudHotbarPatch.CenteringOffsetX;
 
     internal static HashSet<string> AppliedPatches { get; } = new();
 
@@ -29,7 +37,7 @@ public sealed class OpenHandModSystem : ModSystem
         ApplyPatches(api);
         ApplyClientConfig(api);
         clientController = new OpenHandClientController(
-            api, () => SetIndicatorVisibility(api, !clientConfig.ShowIndicator),
+            api, () => ToggleSettingsDialog(api),
             () => clientConfig.ShowIndicator);
         ReportClientConflicts();
 
@@ -73,6 +81,15 @@ public sealed class OpenHandModSystem : ModSystem
         {
             try
             {
+                // Single-player starts both sides in one process. Harmony
+                // appends duplicate patch methods if registered twice.
+                System.Reflection.MethodBase? target = patchType == typeof(ActiveHandPatch)
+                    ? ActiveHandPatch.TargetMethod() : HudHotbarPatch.TargetMethod();
+                if (target is not null && Harmony.GetPatchInfo(target)?.Owners.Contains(HarmonyId) == true)
+                {
+                    AppliedPatches.Add(patchType.Name);
+                    continue;
+                }
                 harmony.CreateClassProcessor(patchType).Patch();
                 AppliedPatches.Add(patchType.Name);
             }
@@ -124,6 +141,31 @@ public sealed class OpenHandModSystem : ModSystem
         }
     }
 
+    // Shared by the chat commands and the settings dialog: mutate, push to
+    // runtime, persist. UI surfaces decide their own feedback.
+    internal void ApplyAndSaveClientConfig(Action<OpenHandClientConfig> mutate)
+    {
+        mutate(clientConfig);
+        HudHotbarPatch.ApplyConfig(
+            clientConfig,
+            OpenHandClientConfig.ParseIconAnchor(clientConfig.IconAnchor));
+        try
+        {
+            ClientApi?.StoreModConfig(clientConfig, OpenHandClientConfig.ConfigFileName);
+        }
+        catch (Exception exception)
+        {
+            Mod.Logger.Error("Open Hand client config could not be saved: {0}", exception.Message);
+        }
+    }
+
+    private void ToggleSettingsDialog(ICoreClientAPI api)
+    {
+        settingsDialog ??= new OpenHandSettingsDialog(
+            api, () => clientConfig, ApplyAndSaveClientConfig);
+        settingsDialog.Toggle();
+    }
+
     private void SetIndicatorVisibility(ICoreClientAPI api, bool showIndicator)
     {
         clientConfig.ShowIndicator = showIndicator;
@@ -145,6 +187,25 @@ public sealed class OpenHandModSystem : ModSystem
             api.ShowChatMessage(
                 $"Open Hand visual indicator is now {(showIndicator ? "on" : "off")}, but the setting could not be saved.");
         }
+    }
+
+    private TextCommandResult SetHotbarCentering(ICoreClientAPI api, bool enabled)
+    {
+        clientConfig.CenterHotbar = enabled;
+        HudHotbarPatch.ApplyConfig(clientConfig, OpenHandClientConfig.ParseIconAnchor(clientConfig.IconAnchor));
+        string message = enabled
+            ? "Open Hand centering enabled for compatible layouts. Use .openhand status to check whether it is active."
+            : "Open Hand centering disabled.";
+        try
+        {
+            api.StoreModConfig(clientConfig, OpenHandClientConfig.ConfigFileName);
+        }
+        catch (Exception exception)
+        {
+            Mod.Logger.Error("Open Hand centering preference could not be saved: {0}", exception.Message);
+            message += " The setting could not be saved.";
+        }
+        return TextCommandResult.Success(message);
     }
 
     // Generic conflict detection: WHO patches the methods Open Hand relies on
@@ -282,11 +343,28 @@ public sealed class OpenHandModSystem : ModSystem
                 return TextCommandResult.Success("", "openhand-indicator-toggle");
             })
             .EndSubCommand()
+            .EndSubCommand()
+            .BeginSubCommand("center")
+            .WithDescription("Opts into centering the visible automatic hotbar extension")
+            .BeginSubCommand("on")
+            .WithDescription("Enables centering for compatible layouts")
+            .HandleWith(_ => SetHotbarCentering(api, true))
+            .EndSubCommand()
+            .BeginSubCommand("off")
+            .WithDescription("Restores the original hotbar position")
+            .HandleWith(_ => SetHotbarCentering(api, false))
+            .EndSubCommand()
+            .BeginSubCommand("toggle")
+            .WithDescription("Toggles the saved hotbar centering preference")
+            .HandleWith(_ => SetHotbarCentering(api, !clientConfig.CenterHotbar))
+            .EndSubCommand()
             .EndSubCommand();
     }
 
     public override void Dispose()
     {
+        settingsDialog?.Dispose();
+        settingsDialog = null;
         HudHotbarPatch.DetachContinuousBackground();
         HudHotbarPatch.ResetIconTexture();
         clientController?.Dispose();

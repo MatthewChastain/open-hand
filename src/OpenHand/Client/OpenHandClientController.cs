@@ -25,7 +25,7 @@ internal sealed class OpenHandClientController : IDisposable
     private int nextRevision;
     private bool disposed;
 
-    public OpenHandClientController(ICoreClientAPI capi, Action toggleIndicator, Func<bool> isIndicatorVisible)
+    public OpenHandClientController(ICoreClientAPI capi, Action openSettings, Func<bool> isIndicatorVisible)
     {
         this.capi = capi;
         this.isIndicatorVisible = isIndicatorVisible;
@@ -52,13 +52,13 @@ internal sealed class OpenHandClientController : IDisposable
 
         capi.Input.RegisterHotKey(
             IndicatorHotKeyCode,
-            "Toggle Open Hand indicator",
+            "Open Open Hand settings",
             GlKeys.Tilde,
             HotkeyType.CharacterControls,
             ctrlPressed: true);
         capi.Input.SetHotKeyHandler(IndicatorHotKeyCode, _ =>
         {
-            toggleIndicator();
+            openSettings();
             return true;
         });
 
