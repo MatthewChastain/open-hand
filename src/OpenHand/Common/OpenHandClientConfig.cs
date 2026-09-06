@@ -1,8 +1,8 @@
 namespace OpenHand.Common;
 
 /// <summary>
-/// Client-only config for the Open Hand HUD, stored as <c>openhand.json</c>
-/// in the mod config folder. It never affects selection state or server sync.
+/// Client-only config for the Open Hand HUD and wheel entry, stored as
+/// <c>openhand.json</c> in the mod config folder. Server sync is unchanged.
 /// </summary>
 public sealed class OpenHandClientConfig
 {
@@ -24,8 +24,8 @@ public sealed class OpenHandClientConfig
 
     /// <summary>
     /// Whether the client renders the Open Hand HUD panel, hand cell, and
-    /// selection outline. Selection behavior and server synchronization are
-    /// unaffected when this is disabled.
+    /// selection outline. When disabled, entry is hotkey-only; wheel exit
+    /// and server synchronization are unchanged.
     /// </summary>
     public bool ShowIndicator { get; set; } = true;
 

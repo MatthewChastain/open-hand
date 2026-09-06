@@ -43,7 +43,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 REPO = Path(__file__).resolve().parent.parent
 ASSETS_SRC = REPO / "assets-src"
@@ -309,6 +309,18 @@ def rebuild_openhand_slot() -> None:
     # The source border is not part of the glyph. Its fingertips start well
     # inside this inset, so excluding the four outer pixels keeps the outline
     # entirely vanilla while preserving the hand.
+    glyph_alpha[:4, :] = 0
+    glyph_alpha[-4:, :] = 0
+    glyph_alpha[:, :4] = 0
+    glyph_alpha[:, -4:] = 0
+    # Dilate the extracted hand by one source pixel. The runtime frame remains
+    # untouched, while the glyph stays readable after bilinear scaling.
+    glyph_alpha = np.asarray(
+        Image.fromarray(np.round(glyph_alpha * 255).astype(np.uint8)).filter(
+            ImageFilter.MaxFilter(3)
+        ),
+        dtype=np.float64,
+    ) / 255.0
     glyph_alpha[:4, :] = 0
     glyph_alpha[-4:, :] = 0
     glyph_alpha[:, :4] = 0

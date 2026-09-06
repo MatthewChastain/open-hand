@@ -1,6 +1,7 @@
 using System.Reflection;
 using Cairo;
 using HarmonyLib;
+using OpenHand.Client;
 using OpenHand.Common;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -35,15 +36,16 @@ internal static class HudHotbarPatch
 
     private static readonly AssetLocation IconGlyphLocation =
         new AssetLocation("openhand", "textures/hud/openhand-glyph.png");
-    private static readonly AssetLocation SoilTextureLocation =
-        new AssetLocation("game", "gui/backgrounds/soil.png");
 
     // The frame is composed on a fresh Cairo surface at the CURRENT scaled
     // slot size, precisely as vanilla does. The hand glyph alone is resampled,
     // so interpolation can never soften the final crisp frame stroke.
     private static LoadedTexture? iconFrameTexture;
     private static LoadedTexture? iconGlyphTexture;
-    private static LoadedTexture? hotbarExtensionTexture;
+    private static GuiComposer? extendedComposer;
+    private static ContinuousHotbarBackground? continuousBackground;
+    private static GuiComposer? failedBackgroundComposer;
+    private static bool loggedBackgroundFailure;
 
     // Client config (openhand.json); defaults until StartClientSide loads the
     // real file. Client-only by definition, mirroring the ClientApi singleton.
@@ -67,13 +69,20 @@ internal static class HudHotbarPatch
         config = value;
         anchorMode = mode;
         loggedProbeFailure = false;
+        loggedBackgroundFailure = false;
+        failedBackgroundComposer = null;
+        if (!config.ShowIndicator || anchorMode != IconAnchorMode.Auto)
+        {
+            DetachContinuousBackground();
+        }
     }
 
     internal static string DescribeIconPlacement()
     {
         return $"indicator={(config.ShowIndicator ? "on" : "off")} " +
             $"{anchorMode.ToString().ToLowerInvariant()} offset=({config.IconOffsetX},{config.IconOffsetY}) | " +
-            $"last render: {lastPlacementDescription}";
+            $"last render: {lastPlacementDescription} | " +
+            $"background={(continuousBackground is null ? "vanilla" : $"continuous +{continuousBackground.ExtensionWidth}px")}";
     }
 
     internal static MethodBase? TargetMethod()
@@ -91,8 +100,14 @@ internal static class HudHotbarPatch
         iconFrameTexture = null;
         iconGlyphTexture?.Dispose();
         iconGlyphTexture = null;
-        hotbarExtensionTexture?.Dispose();
-        hotbarExtensionTexture = null;
+        continuousBackground?.InvalidateTexture();
+        failedBackgroundComposer = null;
+    }
+
+    internal static void OnLeftWorld()
+    {
+        DetachContinuousBackground(recompose: false);
+        ResetIconTexture();
     }
 
     private static void Prefix(object __instance)
@@ -114,13 +129,16 @@ internal static class HudHotbarPatch
         y += config.IconOffsetY;
         lastPlacementDescription = placementDescription;
 
-        // This must render before HudHotbar.OnRenderGUI. The panel deliberately
-        // overlaps its left edge; rendering in the postfix puts that overlap
-        // above vanilla cells and their stack icons. The prefix lets vanilla
-        // draw every existing hotbar element over the extension instead.
-        if (config.ShowIndicator && drawHotbarExtension)
+        try
         {
-            DrawHotbarExtension(capi, __instance, x, y, size);
+            UpdateContinuousBackground(capi, __instance, x, y, size,
+                config.ShowIndicator && drawHotbarExtension);
+        }
+        catch (Exception exception)
+        {
+            failedBackgroundComposer = (__instance as GuiDialog)?.Composers["hotbar"];
+            DetachContinuousBackground();
+            capi.Logger.Warning("Open Hand could not compose the continuous background; using vanilla: {0}", exception);
         }
 
         if (OpenHandRuntime.IsSelected(capi.World?.Player))
@@ -129,55 +147,93 @@ internal static class HudHotbarPatch
         }
     }
 
-    private static void DrawHotbarExtension(ICoreClientAPI capi, object instance, int x, int y, int size)
+    private static void UpdateContinuousBackground(
+        ICoreClientAPI capi, object instance, int x, int y, int size, bool enabled)
     {
-        int sidePadding = Math.Max(1, (int)Math.Round(GuiElement.scaled(8.0)));
-        // BlurFull(scaled(9)) leaves its left-edge rim visible for roughly 24
-        // scaled pixels into the hotbar. Cover that whole tail.
-        int joinOverlap = Math.Max(1, (int)Math.Round(GuiElement.scaled(24.0)));
-        int hotbarTopInset = Math.Max(1, (int)Math.Round(GuiElement.scaled(10.0)));
-        int hotbarHeight = Math.Max(1, (int)Math.Round(GuiElement.scaled(80.0)));
-        int backgroundX = x - sidePadding;
-        int backgroundY = y - hotbarTopInset;
-        int backgroundRight = x + size + sidePadding;
-
-        if (TryGetHotbarBounds(instance, out ElementBounds hotbarBounds))
+        GuiComposer? composer = (instance as GuiDialog)?.Composers["hotbar"];
+        if (!ReferenceEquals(composer, extendedComposer) ||
+            (continuousBackground is not null &&
+             !ReferenceEquals(composer?.GetElement("element-2"), continuousBackground)))
         {
-            // The source panel begins around Open Hand, but it continues below
-            // the vanilla backdrop's left-rim tail. Because this executes in
-            // the prefix, the bar will paint its own cells and stack icons on
-            // top of every overlapped panel pixel.
-            backgroundRight = Math.Max(
-                backgroundRight,
-                (int)hotbarBounds.renderX + joinOverlap);
+            DetachContinuousBackground();
         }
-        if (instance is GuiDialog dialog &&
-            TryGetOffhandBounds(dialog, out ElementBounds offhandBounds))
+        if (!enabled || composer is null)
         {
-            // The extension may fill the normal gap before offhand, but never
-            // lies underneath offhand's own background or item stack.
-            backgroundRight = Math.Min(backgroundRight, (int)offhandBounds.renderX);
+            DetachContinuousBackground();
+            return;
         }
-
-        int backgroundWidth = Math.Max(1, backgroundRight - backgroundX);
-        if (hotbarExtensionTexture is null ||
-            hotbarExtensionTexture.Width != backgroundWidth ||
-            hotbarExtensionTexture.Height != hotbarHeight)
+        if (ReferenceEquals(composer, failedBackgroundComposer)) return;
+        if (ComposerStaticElementsField?.GetValue(composer) is not Dictionary<string, GuiElement> elements ||
+            composer.GetElement("element-2") is not GuiElementDialogBackground background ||
+            (background.GetType() != typeof(GuiElementDialogBackground) && background != continuousBackground) ||
+            !background.FullBlur || Math.Abs(background.Bounds.bgDrawX) > 0.001 ||
+            composer.GetElement("element-3") is not GuiElementCustomDraw)
         {
-            BakeHotbarExtensionTexture(capi, backgroundWidth, hotbarHeight);
+            DetachContinuousBackground();
+            if (!loggedBackgroundFailure)
+            {
+                loggedBackgroundFailure = true;
+                capi.Logger.Notification(
+                    "Open Hand could not safely extend this hotbar background; keeping the original background and standalone hand icon.");
+            }
+            return;
         }
 
-        if (hotbarExtensionTexture is not null && hotbarExtensionTexture.TextureId != 0)
+        int padding = GetMatchingSidePadding(instance, y - config.IconOffsetY, size);
+        int extensionWidth = OpenHandHudGeometry.ExtensionWidth((int)composer.Bounds.renderX, x, padding);
+        if (extensionWidth == 0)
         {
-            capi.Render.Render2DTexture(
-                hotbarExtensionTexture.TextureId,
-                backgroundX,
-                backgroundY,
-                backgroundWidth,
-                hotbarHeight,
-                49f);
+            DetachContinuousBackground();
+            return;
+        }
+        if (continuousBackground is null)
+        {
+            continuousBackground = new ContinuousHotbarBackground(capi, background);
+            extendedComposer = composer;
+            // Replace only the value, preserving static draw order and the
+            // entire original bounds tree (including slot hitboxes).
+            elements["element-2"] = continuousBackground;
+        }
+        continuousBackground.SetExtensionWidth(extensionWidth);
+        if (continuousBackground.NeedsRecompose)
+        {
+            composer.ReCompose();
+            RestoreHighlight(capi, capi.World.Player.InventoryManager.ActiveHotbarSlotNumber);
         }
     }
+
+    internal static void DetachContinuousBackground(bool recompose = true)
+    {
+        GuiComposer? composer = extendedComposer;
+        ContinuousHotbarBackground? background = continuousBackground;
+        extendedComposer = null;
+        continuousBackground = null;
+        if (background is null) return;
+
+        if (composer is not null &&
+            ComposerStaticElementsField?.GetValue(composer) is Dictionary<string, GuiElement> elements &&
+            elements.TryGetValue("element-2", out GuiElement? current) && ReferenceEquals(current, background))
+        {
+            background.RestoreOriginalStyle();
+            elements["element-2"] = background.Original;
+            // Retry vanilla after a failed extension composition, but avoid
+            // recomposing an old, disposed world/composer during cleanup.
+            if (recompose && (composer.Composed || ReferenceEquals(composer, failedBackgroundComposer)))
+            {
+                try
+                {
+                    composer.ReCompose();
+                }
+                catch (Exception exception)
+                {
+                    OpenHandModSystem.ClientApi?.Logger.Warning(
+                        "Open Hand restored the vanilla background element, but recomposition failed: {0}", exception);
+                }
+            }
+        }
+        background.Dispose();
+    }
+
     private static void Postfix(object __instance)
     {
         if (!config.ShowIndicator)
@@ -195,6 +251,16 @@ internal static class HudHotbarPatch
         }
 
         ElementBounds slotZero = slotBounds[0];
+
+        // Adjacent crops of one background never cover a vanilla slot. Draw
+        // after vanilla so recomposition inside OnRenderGUI refreshes both.
+        if (player.WorldData.CurrentGameMode == EnumGameMode.Spectator) return;
+        if (__instance is GuiDialog dialog && extendedComposer is not null &&
+            ReferenceEquals(dialog.Composers["hotbar"], extendedComposer) &&
+            ReferenceEquals(extendedComposer.GetElement("element-2"), continuousBackground))
+        {
+            continuousBackground?.RenderExtension(extendedComposer);
+        }
 
         // Pixel-snap to the truncated screen coordinates vanilla renders slot
         // textures at ((int)renderX/renderY, OuterWidthInt). Integer math in
@@ -395,19 +461,44 @@ internal static class HudHotbarPatch
                 GuiElement.scaled(GuiElementItemSlotGridBase.unscaledSlotPadding)));
     }
 
-    private static bool TryGetHotbarBounds(object instance, out ElementBounds bounds)
+    private static bool TryGetHotbarBackgroundBounds(object instance, out ElementBounds bounds)
     {
         bounds = null!;
         if (instance is not GuiDialog dialog ||
-            dialog.Composers["hotbar"]?.Bounds is not ElementBounds hotbarBounds ||
-            hotbarBounds.OuterWidthInt <= 0 ||
-            hotbarBounds.OuterHeightInt <= 0)
+            dialog.Composers["hotbar"]?.GetElement("element-2") is not GuiElementDialogBackground hotbarBackground ||
+            hotbarBackground.Bounds.OuterWidthInt <= 0 ||
+            hotbarBackground.Bounds.OuterHeightInt <= 0)
         {
             return false;
         }
 
-        bounds = hotbarBounds;
+        // HudHotbar.ComposeGuis installs AddShadedDialogBG as element-2.
+        // Its bounds exclude the root composer's 20px vertical grow area.
+        bounds = hotbarBackground.Bounds;
         return true;
+    }
+
+    private static int GetMatchingSidePadding(object instance, int rowY, int size)
+    {
+        // Grid bounds include a trailing gutter: measure actual rendered
+        // cells so mods that resize or rebuild the hotbar are also supported.
+        int fallback = Math.Max(1, (int)Math.Round(GuiElement.scaled(
+            10.0 + GuiElementItemSlotGridBase.unscaledSlotPadding)));
+        if (instance is not GuiDialog dialog ||
+            dialog.Composers["hotbar"] is not GuiComposer composer ||
+            ComposerStaticElementsField is null ||
+            !TryGetHotbarBackgroundBounds(instance, out ElementBounds background))
+        {
+            return fallback;
+        }
+
+        RowIntervals.Clear();
+        // AddInteractiveElement also registers in staticElements.
+        CollectRowIntervals(composer, ComposerStaticElementsField, rowY, size);
+        int rootX = (int)composer.Bounds.renderX;
+        int left = rootX + (int)background.bgDrawX;
+        int right = rootX + (int)(background.bgDrawX + background.OuterWidth);
+        return OpenHandHudGeometry.MirrorRightPadding(left, right, RowIntervals, fallback);
     }
 
     private static void CollectRowIntervals(GuiComposer composer, FieldInfo elementsField, int slotZeroY, int size)
@@ -508,79 +599,6 @@ internal static class HudHotbarPatch
         iconFrameTexture = frameTexture;
         iconGlyphTexture?.Dispose();
         iconGlyphTexture = glyphTexture;
-    }
-
-    private static void BakeHotbarExtensionTexture(ICoreClientAPI capi, int targetWidth, int targetHeight)
-    {
-        LoadedTexture texture = ComposeHotbarExtensionTexture(capi, targetWidth, targetHeight);
-
-        hotbarExtensionTexture?.Dispose();
-        hotbarExtensionTexture = texture;
-    }
-
-    // Direct transcription of GuiElementDialogBackground.ComposeElements.
-    // Compose beyond the requested right edge and crop, leaving that edge
-    // borderless so it merges into the existing bar without a double seam.
-    private static LoadedTexture ComposeHotbarExtensionTexture(
-        ICoreClientAPI capi,
-        int targetWidth,
-        int targetHeight)
-    {
-        int cropMargin = Math.Max(1, (int)Math.Ceiling(GuiElement.scaled(24.0)));
-        using ImageSurface source = new(
-            Format.Argb32,
-            targetWidth + cropMargin,
-            targetHeight);
-        using Context sourceContext = new(source);
-
-        double sourceWidth = source.Width;
-        double sourceHeight = source.Height;
-        double strokeWidth = GuiElement.scaled(5.0);
-        GuiElement.RoundRectangle(
-            sourceContext,
-            0,
-            0,
-            sourceWidth,
-            sourceHeight - 1,
-            GuiStyle.DialogBGRadius);
-        sourceContext.SetSourceRGBA(GuiStyle.DialogStrongBgColor);
-        sourceContext.FillPreserve();
-
-        sourceContext.SetSourceRGBA(
-            GuiStyle.DialogLightBgColor[0] * 2.1,
-            GuiStyle.DialogStrongBgColor[1] * 2.1,
-            GuiStyle.DialogStrongBgColor[2] * 2.1,
-            1);
-        sourceContext.LineWidth = strokeWidth * 2;
-        sourceContext.StrokePreserve();
-        source.BlurFull(GuiElement.scaled(9.0));
-
-        SurfacePattern soilPattern = GuiElement.getPattern(
-            capi,
-            SoilTextureLocation,
-            true,
-            64,
-            0.125f);
-        sourceContext.SetSource(soilPattern);
-        sourceContext.FillPreserve();
-        sourceContext.Operator = Operator.Over;
-
-        sourceContext.SetSourceRGBA(45 / 255.0, 35 / 255.0, 33 / 255.0, 0.75 * 0.75);
-        sourceContext.LineWidth = strokeWidth;
-        sourceContext.Stroke();
-
-        using ImageSurface cropped = new(Format.Argb32, targetWidth, targetHeight);
-        using Context croppedContext = new(cropped);
-        croppedContext.SetSourceSurface(source, 0, 0);
-        croppedContext.Paint();
-
-        int textureId = capi.Gui.LoadCairoTexture(cropped, true);
-        return new LoadedTexture(capi)
-        {
-            TextureId = textureId,
-            Width = targetWidth,
-            Height = targetHeight,
-        };
     }
 
     private static LoadedTexture? BakeTexture(ICoreClientAPI capi, AssetLocation location, int targetWidth, int targetHeight)

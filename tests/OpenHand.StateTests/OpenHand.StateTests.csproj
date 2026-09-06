@@ -9,5 +9,6 @@
     <Compile Include="../../src/OpenHand/Common/OpenHandWheelRing.cs" Link="OpenHandWheelRing.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandGapSolver.cs" Link="OpenHandGapSolver.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandClientConfig.cs" Link="OpenHandClientConfig.cs" />
+    <Compile Include="../../src/OpenHand/Common/OpenHandHudGeometry.cs" Link="OpenHandHudGeometry.cs" />
   </ItemGroup>
 </Project>

@@ -11,11 +11,14 @@ Built and tested against Vintage Story **1.22.7**, and the packaged mod declares
 ## Controls
 
 - Tilde (rebindable under Settings → Controls → Movement & character controls as **Select Open Hand**) selects Open Hand. Press it again to jump back to the slot you had selected before entering it.
-- The wheel ring runs `1` through `0`, then Open Hand, then back to `1`. Scroll down from the `0` slot — or from an occupied skill slot — or scroll up from the `1` slot to enter Open Hand.
+- Ctrl + tilde toggles the visual indicator without changing your hand selection. Rebind it in the same controls category as **Toggle Open Hand indicator**. Visibility is saved in `openhand.json` and defaults to on.
+- With the indicator hidden, scrolling skips Open Hand; use the **Select Open Hand** hotkey to activate it. You can still scroll out of Open Hand afterward. Showing the indicator restores wheel entry immediately.
+- With the indicator shown, the wheel ring runs `1` through `0`, then Open Hand, then back to `1`. Scroll down from the `0` slot — or from an occupied skill slot — or scroll up from the `1` slot to enter Open Hand.
 - Scroll once more to leave: down selects the `1` slot, up selects the `0` slot, or the skill slot while it holds an item.
 - Any number key or hotbar click leaves Open Hand.
 - Wheel scrolling works normally in dialogs and vanilla backpack mode.
 - `/openhand status` prints diagnostics: selection state, remembered slot, server revision, patch status.
+- `.openhand indicator on`, `.openhand indicator off`, and `.openhand indicator toggle` control the same saved visibility setting (use a period, not a slash).
 
 While Open Hand is selected the engine resolves the main hand as empty. The ten physical hotbar slots and the offhand are never touched.
 

@@ -27,13 +27,15 @@ public sealed class OpenHandModSystem : ModSystem
     {
         ClientApi = api;
         ApplyPatches(api);
-        clientController = new OpenHandClientController(api);
         ApplyClientConfig(api);
+        clientController = new OpenHandClientController(
+            api, () => SetIndicatorVisibility(api, !clientConfig.ShowIndicator),
+            () => clientConfig.ShowIndicator);
         ReportClientConflicts();
 
         // GL texture IDs change across world transitions and texture reloads;
         // drop the cached indicator texture so it is re-uploaded next render.
-        api.Event.LeftWorld += Patches.HudHotbarPatch.ResetIconTexture;
+        api.Event.LeftWorld += Patches.HudHotbarPatch.OnLeftWorld;
         api.Event.ReloadTextures += Patches.HudHotbarPatch.ResetIconTexture;
 
         RegisterStatusCommand(api);
@@ -85,7 +87,7 @@ public sealed class OpenHandModSystem : ModSystem
         }
     }
 
-    // Client-only config for the HUD indicator; never affects selection sync.
+    // Client-only indicator and wheel-entry preference; selection sync is unchanged.
     private void ApplyClientConfig(ICoreClientAPI api)
     {
         OpenHandClientConfig? loadedConfig;
@@ -285,6 +287,8 @@ public sealed class OpenHandModSystem : ModSystem
 
     public override void Dispose()
     {
+        HudHotbarPatch.DetachContinuousBackground();
+        HudHotbarPatch.ResetIconTexture();
         clientController?.Dispose();
         serverController?.Dispose();
         harmony?.UnpatchAll(HarmonyId);
@@ -292,7 +296,7 @@ public sealed class OpenHandModSystem : ModSystem
         ICoreClientAPI? clientApi = ClientApi;
         if (clientApi is not null)
         {
-            clientApi.Event.LeftWorld -= Patches.HudHotbarPatch.ResetIconTexture;
+            clientApi.Event.LeftWorld -= Patches.HudHotbarPatch.OnLeftWorld;
             clientApi.Event.ReloadTextures -= Patches.HudHotbarPatch.ResetIconTexture;
         }
 

@@ -16,10 +16,11 @@ static void Wheel(
     bool skillOccupied,
     bool backpackMode,
     int wheelDelta,
-    string name)
+    string name,
+    bool allowEntry = true)
 {
     OpenHandWheelRing.WheelDecision decision =
-        OpenHandWheelRing.Resolve(isSelected, activeSlot, skillOccupied, backpackMode, wheelDelta);
+        OpenHandWheelRing.Resolve(isSelected, activeSlot, skillOccupied, backpackMode, wheelDelta, allowEntry);
     Equal(expectedAction, decision.Action, $"{name} action");
     Equal(expectedDestination, decision.Destination, $"{name} destination");
 }
@@ -80,6 +81,33 @@ Wheel(OpenHandWheelRing.WheelAction.ExitToSlot, 10,
 Wheel(OpenHandWheelRing.WheelAction.None, 5,
     isSelected: true, activeSlot: 5, skillOccupied: false, backpackMode: true, wheelDelta: -1,
     name: "no exit in backpack mode");
+
+// A hidden indicator disables wheel entry across the whole vanilla ring,
+// including the occupied skill slot, but never traps hotkey-selected Open Hand.
+foreach (bool skillOccupied in new[] { false, true })
+foreach (bool backpackMode in new[] { false, true })
+foreach (int delta in new[] { -3, -1, 0, 1, 3 })
+for (int slot = 0; slot < 14; slot++)
+{
+    Wheel(OpenHandWheelRing.WheelAction.None, slot,
+        false, slot, skillOccupied, backpackMode, delta,
+        $"hidden indicator passes through slot={slot} skill={skillOccupied} backpack={backpackMode} delta={delta}",
+        allowEntry: false);
+    OpenHandWheelRing.WheelDecision visibleExit =
+        OpenHandWheelRing.Resolve(true, slot, skillOccupied, backpackMode, delta);
+    OpenHandWheelRing.WheelDecision hiddenExit =
+        OpenHandWheelRing.Resolve(true, slot, skillOccupied, backpackMode, delta, allowEntry: false);
+    Equal(visibleExit, hiddenExit, "hidden indicator preserves wheel exit");
+}
+
+OpenHandClientConfig wheelConfig = new() { ShowIndicator = false };
+Equal(OpenHandWheelRing.WheelAction.None,
+    OpenHandWheelRing.Resolve(false, 9, false, false, -1, wheelConfig.ShowIndicator).Action,
+    "hidden indicator skips wheel entry");
+wheelConfig.ShowIndicator = true;
+Equal(OpenHandWheelRing.WheelAction.Enter,
+    OpenHandWheelRing.Resolve(false, 9, false, false, -1, wheelConfig.ShowIndicator).Action,
+    "showing indicator restores wheel entry");
 
 // Gap solver: tier 1 - the preferred gap wins when it fits the cell.
 Gap(OpenHandGapSolver.GapChoice.Preferred, 57,
@@ -176,4 +204,24 @@ static void Gap(
     Equal(expectedX, placement.X, $"{name} x");
 }
 
-Console.WriteLine("OpenHandSelectionState, wheel ring, gap solver, and config tests passed.");
+// Mirror final rendered pixels, including the trailing grid gutter.
+Equal(13, OpenHandHudGeometry.MirrorRightPadding(100, 950,
+    new (int, int)[] { (110, 158), (889, 937) }, 99), "vanilla right padding");
+Equal(20, OpenHandHudGeometry.MirrorRightPadding(100, 1375,
+    new (int, int)[] { (115, 187), (1283, 1355) }, 99), "1.5 scale right padding");
+Equal(24, OpenHandHudGeometry.MirrorRightPadding(77, 1199,
+    new (int, int)[] { (90, 150), (1000, 1060), (1115, 1175) }, 99), "modded width padding");
+Equal(13, OpenHandHudGeometry.MirrorRightPadding(100, 950,
+    new (int, int)[] { (889, 937), (960, 1008), (90, 150), (945, 945) }, 99), "ignore outside or empty cells");
+Equal(13, OpenHandHudGeometry.MirrorRightPadding(100, 950,
+    Array.Empty<(int, int)>(), 13), "missing grids fallback");
+Equal(0, OpenHandHudGeometry.MirrorRightPadding(100, 950,
+    new (int, int)[] { (902, 950) }, 13), "flush right cell padding");
+
+Equal(54, OpenHandHudGeometry.ExtensionWidth(100, 59, 13), "shared background extends 54 pixels");
+Equal(81, OpenHandHudGeometry.ExtensionWidth(150, 89, 20), "shared background scaled width");
+Equal(54, OpenHandHudGeometry.ExtensionWidth(900, 859, 13), "screen translation does not change extension width");
+Equal(0, OpenHandHudGeometry.ExtensionWidth(100, 120, 13), "no extension for inset icon");
+Equal(11, OpenHandHudGeometry.ExtensionWidth(100, 102, 13), "extend only exposed padding");
+
+Console.WriteLine("OpenHandSelectionState, wheel ring, gap solver, config, and HUD geometry tests passed.");
