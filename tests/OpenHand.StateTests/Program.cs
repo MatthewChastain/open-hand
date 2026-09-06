@@ -8,6 +8,21 @@ static void Equal<T>(T expected, T actual, string name) where T : notnull
     }
 }
 
+static void DoubleTap(
+    OpenHandDoubleTap.DoubleTapAction expectedAction,
+    int expectedDestination,
+    bool isSelected,
+    int activeSlot,
+    int requestedSlot,
+    string name,
+    bool enabled = true)
+{
+    OpenHandDoubleTap.DoubleTapDecision decision =
+        OpenHandDoubleTap.Resolve(isSelected, activeSlot, requestedSlot, enabled);
+    Equal(expectedAction, decision.Action, $"{name} action");
+    Equal(expectedDestination, decision.Destination, $"{name} destination");
+}
+
 static void Wheel(
     OpenHandWheelRing.WheelAction expectedAction,
     int expectedDestination,
@@ -108,6 +123,41 @@ wheelConfig.ShowIndicator = true;
 Equal(OpenHandWheelRing.WheelAction.Enter,
     OpenHandWheelRing.Resolve(false, 9, false, false, -1, wheelConfig.ShowIndicator).Action,
     "showing indicator restores wheel entry");
+
+// Double-tap: re-tapping the active slot's number key selects Open Hand.
+DoubleTap(OpenHandDoubleTap.DoubleTapAction.Enter, 4,
+    isSelected: false, activeSlot: 4, requestedSlot: 4,
+    name: "re-tap active slot enters");
+DoubleTap(OpenHandDoubleTap.DoubleTapAction.ExitToSlot, 4,
+    isSelected: true, activeSlot: 4, requestedSlot: 4,
+    name: "re-tap remembered slot exits");
+
+// Double-tap: other slot keys keep vanilla semantics.
+DoubleTap(OpenHandDoubleTap.DoubleTapAction.None, 6,
+    isSelected: false, activeSlot: 4, requestedSlot: 6,
+    name: "different slot defers to vanilla");
+DoubleTap(OpenHandDoubleTap.DoubleTapAction.None, 6,
+    isSelected: true, activeSlot: 4, requestedSlot: 6,
+    name: "different slot defers while selected");
+
+// Double-tap: out-of-range requests are rejected outright.
+DoubleTap(OpenHandDoubleTap.DoubleTapAction.None, 4,
+    isSelected: false, activeSlot: 4, requestedSlot: 10,
+    name: "skill slot never double-taps");
+DoubleTap(OpenHandDoubleTap.DoubleTapAction.None, 4,
+    isSelected: false, activeSlot: 4, requestedSlot: -1,
+    name: "negative slot never double-taps");
+
+// Double-tap: disabled restores vanilla behavior entirely.
+DoubleTap(OpenHandDoubleTap.DoubleTapAction.None, 4,
+    isSelected: false, activeSlot: 4, requestedSlot: 4, enabled: false,
+    name: "disabled passes re-tap through");
+DoubleTap(OpenHandDoubleTap.DoubleTapAction.None, 4,
+    isSelected: true, activeSlot: 4, requestedSlot: 4, enabled: false,
+    name: "disabled passes exit through");
+
+Equal(false, new OpenHandClientConfig().DoubleTapHotbarKey, "double tap defaults off");
+Equal(true, new OpenHandClientConfig().CenterHotbar, "centering defaults on");
 
 // Gap solver: tier 1 - the preferred gap wins when it fits the cell.
 Gap(OpenHandGapSolver.GapChoice.Preferred, 57,
