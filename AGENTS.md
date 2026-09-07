@@ -65,15 +65,24 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   (`src/OpenHand/Patches/ActiveHandPatch.cs`), not by adding or editing slots.
   Item stacks must remain untouched in every code path.
 - **The substituted slot satisfies vanilla slot contracts.** While selected,
-  `ActiveHotbarSlot` returns a shared empty slot that is a real member
-  (index 0) of a mod-owned one-slot `DummyInventory` (`Inventory` non-null;
-  `GetSlotId` returns 0). Third-party mods dereference `slot.Inventory` every
-  tick (Overhaul lib legacy compat crashed on a null inventory there), and
-  CarryOn's `LockedItemSlot` constructor searches `slot.Inventory` by
-  reference identity and throws when the slot is not a member — the 1.0.1
-  build attached the player's hotbar inventory without membership and
-  crashed on chest pick-up. Do not re-point the slot at the player's own
-  inventories or hand it out unattached.
+  `ActiveHotbarSlot` returns the current occupant of index 0 in a mod-owned
+  one-slot `DummyInventory` — normally the shared always-empty slot itself
+  (`Inventory` non-null; `GetSlotId` returns 0). Third-party mods dereference
+  `slot.Inventory` every tick (Overhaul lib legacy compat crashed on a null
+  inventory there), and CarryOn's `LockedItemSlot` constructor searches
+  `slot.Inventory` by reference identity and throws when the slot is not a
+  member — the 1.0.1 build attached the player's hotbar inventory without
+  membership and crashed on chest pick-up. Do not re-point the slot at the
+  player's own inventories or hand it out unattached. Hand out the current
+  index-0 occupant rather than the slot itself: CarryOn's pick-up replaces
+  the occupant with a `LockedItemSlot` wrapper and restores it through the
+  same getter later, so returning the occupant keeps that round-trip working
+  (returning the slot directly stranded the wrapper and crashed the next
+  pick-up). Known quirk that cannot be fixed from our side: picking a block
+  up without Open Hand selected, then putting it down while selected, leaves
+  the real hotbar slot locked — CarryOn's Restore misses it through our
+  getter, and the slot recovers on the next unselected pick-up/put-down
+cycle on that slot.
 - **Only two vanilla patch targets exist**: the `ActiveHotbarSlot` getter and
   `HudHotbar.OnRenderGUI` (plus reading its private `hotbarSlotGrid` field) in
   `src/OpenHand/Patches/HudHotbarPatch.cs`. Patches resolve private members via
