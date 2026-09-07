@@ -23,6 +23,7 @@ internal sealed class OpenHandClientController : IDisposable
     private readonly IClientNetworkChannel channel;
     private readonly Func<bool> isIndicatorVisible;
     private readonly Func<bool> isDoubleTapEnabled;
+    private long sweepListenerId;
     private int nextRevision;
     private bool disposed;
 
@@ -68,12 +69,21 @@ internal sealed class OpenHandClientController : IDisposable
             return true;
         });
 
+        sweepListenerId = capi.Event.RegisterGameTickListener(
+            OnGameTick, 0, 0);
+
         capi.Event.MouseWheelMove += OnMouseWheelMove;
         capi.Event.MouseDown += OnMouseDown;
         capi.Event.BeforeActiveSlotChanged += OnBeforeActiveSlotChanged;
         capi.Event.KeyDown += OnKeyDown;
         capi.Event.LeftWorld += OnLeftWorld;
     }
+
+    // Enforces the substituted-slot invariants every tick: CarryOn's
+    // place-down leaves its temporary block stack in the active hand slot and
+    // its pick-up strands a LockedItemSlot wrapper in the mod-owned inventory
+    // (see OpenHandRuntime.SweepSubstitutedSlot).
+    private void OnGameTick(float deltaTime) => OpenHandRuntime.SweepSubstitutedSlot();
 
     // Fires from api.eventapi.TriggerMouseDown before any client system or
     // dialog sees the click (verified against 1.22.7 ClientMain
@@ -383,6 +393,7 @@ internal sealed class OpenHandClientController : IDisposable
         }
 
         disposed = true;
+        capi.Event.UnregisterGameTickListener(sweepListenerId);
         capi.Event.MouseWheelMove -= OnMouseWheelMove;
         capi.Event.MouseDown -= OnMouseDown;
         capi.Event.BeforeActiveSlotChanged -= OnBeforeActiveSlotChanged;

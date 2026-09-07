@@ -52,6 +52,38 @@ public static class OpenHandRuntime
         }
     }
 
+    // Foreign mods can leave the substituted slot in a state the engine must
+    // never see. CarryOn's place-down leaves the placed block's stack in the
+    // active hand slot (its failure branch clears it, its success branch does
+    // not, and vanilla TryPlaceBlock does not consume it), which duplicates
+    // the block on the next interaction; its pick-up replaces the inventory's
+    // index-0 occupant with a LockedItemSlot wrapper, which crashes the next
+    // pick-up's membership search. Neither artifact is reachable through the
+    // substituted getter afterward, so both are reclaimed here. Runs every
+    // game tick on the client and the server; CarryOn's injection and
+    // placement are synchronous within one tick, so the sweep can never race
+    // that window and block behaviors still see the injected stack.
+    public static void SweepSubstitutedSlot()
+    {
+        lock (InventoryLock)
+        {
+            if (containingInventory is null)
+            {
+                return;
+            }
+
+            if (!ReferenceEquals(containingInventory[0], EmptyHandSlot))
+            {
+                containingInventory[0] = EmptyHandSlot;
+            }
+
+            if (!EmptyHandSlot.Empty)
+            {
+                EmptyHandSlot.Itemstack = null;
+            }
+        }
+    }
+
     // ItemSlot.Inventory is a read-only property over this protected field,
     // so the attach has to live in a subclass.
     private sealed class EmptyHandDummySlot : DummySlot

@@ -83,14 +83,20 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   `AccessTools` reflection, and `TargetMethod()` deliberately returns `null`
   (patch silently no-ops, logged) instead of throwing when a target is missing —
   the mod degrades gracefully rather than crashing. Keep that behavior.
-- **One guarded third-party patch is allowed**: `CarryOnHudPatch` postfixes
-  CarryOn's private `HudCarried+HudCarriedRenderer.GetPositionForAnchor` so
-  carried-item icons clear the indicator cell and follow the real hotbar
-  (CarryOn hardcodes a vanilla-centered 850px bar). It must stay optional and
-  degrade to a no-op: `TargetMethod()` returns null when CarryOn is absent,
-  and renamed CarryOn internals pass the original positions through untouched.
-  Verified against decompiled CarryOn 1.14.3; re-verify on CarryOn updates.
-  Do not add further third-party patch targets without discussion.
+- **Third-party compatibility patches are allowed, but only as a last
+  resort.** Try the simpler tools first — public APIs, engine events,
+  reflection reads, or the other mod's own configuration — and patch another
+  mod's internals only when the interaction cannot be handled any other way.
+  Every compatibility patch must stay optional and degrade to a no-op:
+  `TargetMethod()` returns null when the mod is absent, renamed internals
+  pass original behavior through untouched, and each target is verified
+  against decompiled assemblies of the mod's shipping version (include the
+  evidence in the PR; re-verify on mod updates). Document every target here.
+  Current target: `CarryOnHudPatch` postfixes CarryOn's private
+  `HudCarried+HudCarriedRenderer.GetPositionForAnchor` so carried-item icons
+  clear the indicator cell and follow the real hotbar (CarryOn hardcodes a
+  vanilla-centered 850px bar). Verified against decompiled CarryOn 1.14.3;
+  re-verify on CarryOn updates.
 - **Patch targets are verified against decompiled 1.22.7 assemblies.** Changes to
   patch targets or game-version assumptions must include decompile evidence in the PR.
 - **Same-value slot assignment is a no-op in vanilla.** Setting
@@ -146,6 +152,17 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   anchors, which are hardcoded to a vanilla-centered 850px bar and otherwise
   collide with the indicator cell. A CarryOn update that renames its HUD
   internals disables only that correction (logged), never the rest of the mod.
+- CarryOn's placement transaction leaves two artifacts in the substituted
+  slot, both reclaimed by `OpenHandRuntime.SweepSubstitutedSlot()` every game
+  tick (client and server): the placed block's stack stays in the active hand
+  slot after a successful place-down (CarryOn clears it on failure but not on
+  success, and vanilla `TryPlaceBlock` does not consume it), which otherwise
+  duplicates the block on the next interaction; and pick-up replaces the
+  mod-owned inventory's index-0 occupant with a `LockedItemSlot` wrapper,
+  which otherwise crashes the next pick-up. The sweep is why the substituted
+  slot must always be handed out directly (see the slot-contract invariant):
+  exposing the wrapper instead leaks stacks into engine item-move paths and
+  duplicates items — tried and reverted.
 
 ## Packaging
 
