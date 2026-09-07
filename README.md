@@ -20,6 +20,8 @@ Built and tested against Vintage Story **1.22.7**, and the packaged mod declares
 - Any number key or hotbar click leaves Open Hand.
 - With **slot key double-tap** enabled (off by default), pressing the number key of the already-active slot selects Open Hand — and while Open Hand is selected, that same key returns to the slot even though vanilla sees no slot change.
 - Wheel scrolling works normally in dialogs and vanilla backpack mode.
+- Clicking the indicator cell toggles Open Hand, just like the hotkey. If you are holding an item stack on the mouse cursor, the click is swallowed instead — the stack is never dropped by clicking the indicator.
+- While carrying a block with CarryOn, the selection stays locked on Open Hand: scrolling, number keys, and toggling won't kick you out of it. Place the block first — then everything behaves normally.
 
 While Open Hand is selected the engine resolves the main hand as empty. The ten physical hotbar slots and the offhand are never touched.
 
@@ -83,7 +85,7 @@ The optional local API/render regression suite requires the game installation an
 
 ## Compatibility
 
-Do not run alongside Forever Empty; both mods modify selected-hand behavior, and Open Hand warns about the conflict on startup. Overhaul lib legacy compat works as of 1.0.0: the substituted hand slot now satisfies vanilla slot contracts (`Inventory` is always populated), which that mod's per-tick hand checks rely on. Mods that cache or alter `ActiveHotbarSlot` directly may still need compatibility work — open an issue with a minimal reproduction and your Vintage Story version.
+Do not run alongside Forever Empty; both mods modify selected-hand behavior, and Open Hand warns about the conflict on startup. Overhaul lib legacy compat works as of 1.0.0: the substituted hand slot now satisfies vanilla slot contracts (`Inventory` is always populated), which that mod's per-tick hand checks rely on. CarryOn works as of 1.0.2: the substituted hand slot is a real member of a mod-owned inventory, satisfying CarryOn's slot identity check, so picking up containers while Open Hand is selected no longer crashes. As of 1.0.3, Open Hand also repositions CarryOn's carried-item icons: CarryOn hardcodes their positions relative to an assumed vanilla hotbar, which draws them on top of the indicator cell — Open Hand re-derives them from the real hotbar so they clear the cell and follow centering. As of 1.0.4, your selection locks onto Open Hand while you are carrying something with CarryOn — scrolling, number keys, and toggling cannot leave a carried block stranded on a slot that cannot place it — and the carried-item HUD integration reports what it did to the client log once per session, so positioning problems are diagnosable from `client-main.log`. Open Hand additionally clears CarryOn's temporary placement bookkeeping from its substituted hand slot after every place-down, so a carried chest can no longer be placed twice. Mods that cache or alter `ActiveHotbarSlot` directly may still need compatibility work — open an issue with a minimal reproduction and your Vintage Story version.
 
 ## Contributing
 

@@ -23,6 +23,7 @@ internal sealed class OpenHandClientController : IDisposable
     private readonly IClientNetworkChannel channel;
     private readonly Func<bool> isIndicatorVisible;
     private readonly Func<bool> isDoubleTapEnabled;
+    private long sweepListenerId;
     private int nextRevision;
     private bool disposed;
 
@@ -68,10 +69,61 @@ internal sealed class OpenHandClientController : IDisposable
             return true;
         });
 
+        sweepListenerId = capi.Event.RegisterGameTickListener(
+            OnGameTick, 0, 0);
+
         capi.Event.MouseWheelMove += OnMouseWheelMove;
+        capi.Event.MouseDown += OnMouseDown;
         capi.Event.BeforeActiveSlotChanged += OnBeforeActiveSlotChanged;
         capi.Event.KeyDown += OnKeyDown;
         capi.Event.LeftWorld += OnLeftWorld;
+    }
+
+    // Enforces the substituted-slot invariants every tick: CarryOn's
+    // place-down leaves its temporary block stack in the active hand slot and
+    // its pick-up strands a LockedItemSlot wrapper in the mod-owned inventory
+    // (see OpenHandRuntime.SweepSubstitutedSlot).
+    private void OnGameTick(float deltaTime) => OpenHandRuntime.SweepSubstitutedSlot();
+
+    // Fires from api.eventapi.TriggerMouseDown before any client system or
+    // dialog sees the click (verified against 1.22.7 ClientMain
+    // .UpdateMouseButtonState), so handling here protects a cursor-held stack
+    // from HudDropItem, which drops stacks clicked outside every opened
+    // composer's root bounds — exactly where the indicator cell sits. With an
+    // empty cursor the click toggles Open Hand like the hotkey does.
+    private void OnMouseDown(MouseEvent args)
+    {
+        if (args.Handled || !isIndicatorVisible() || capi.Input.MouseGrabbed)
+        {
+            return;
+        }
+
+        IClientPlayer? player = capi.World?.Player;
+        if (player is null || DialogsCaptureInputs() ||
+            !HudHotbarPatch.TryGetIndicatorRect(out int x, out int y, out int size) ||
+            args.X < x || args.X >= x + size || args.Y < y || args.Y >= y + size)
+        {
+            return;
+        }
+
+        // The same guard HudDropItem applies: never steal clicks that belong
+        // to an open dialog's interactive area.
+        foreach (GuiDialog openedDialog in capi.Gui.OpenedGuis)
+        {
+            foreach (GuiComposer composer in openedDialog.Composers.Values)
+            {
+                if (composer.Bounds.PointInside(args.X, args.Y))
+                {
+                    return;
+                }
+            }
+        }
+
+        args.Handled = true;
+        if (player.InventoryManager.MouseItemSlot is not { Empty: false })
+        {
+            SelectOpenHand(player);
+        }
     }
 
     // Vanilla's hotbarslot1-10 handlers return true and the hotkey dispatcher
@@ -82,14 +134,18 @@ internal sealed class OpenHandClientController : IDisposable
     // own handling of the press intact.
     private void OnKeyDown(KeyEvent args)
     {
-        bool enabled = isDoubleTapEnabled();
-        if (args.Handled || !enabled)
+        if (args.Handled)
         {
             return;
         }
 
         IClientPlayer? player = capi.World?.Player;
         if (player is null || DialogsCaptureInputs())
+        {
+            return;
+        }
+
+        if (!isDoubleTapEnabled())
         {
             return;
         }
@@ -111,14 +167,20 @@ internal sealed class OpenHandClientController : IDisposable
             OpenHandRuntime.IsSelected(player),
             player.InventoryManager.ActiveHotbarSlotNumber,
             requestedSlot.Value,
-            enabled);
+            isDoubleTapEnabled());
         switch (decision.Action)
         {
             case OpenHandDoubleTap.DoubleTapAction.Enter:
                 SelectOpenHand(player);
                 break;
             case OpenHandDoubleTap.DoubleTapAction.ExitToSlot:
-                DeselectToSlot(player, decision.Destination);
+                // Selection locked while carrying: CarryOn cancels the slot
+                // change anyway, and exiting would strand the carried block.
+                if (!CarryOnInterop.IsCarryingHands(player.Entity))
+                {
+                    DeselectToSlot(player, decision.Destination);
+                }
+
                 break;
         }
     }
@@ -149,8 +211,13 @@ internal sealed class OpenHandClientController : IDisposable
         if (current.IsSelected)
         {
             // Toggle: pressing the hotkey again returns to the slot held before
-            // entering Open Hand.
-            DeselectToSlot(player, current.RememberedHotbarSlot);
+            // entering Open Hand — blocked while carrying, the same lock as
+            // scrolling and digit keys.
+            if (!CarryOnInterop.IsCarryingHands(player.Entity))
+            {
+                DeselectToSlot(player, current.RememberedHotbarSlot);
+            }
+
             return;
         }
 
@@ -205,7 +272,24 @@ internal sealed class OpenHandClientController : IDisposable
         }
 
         IClientPlayer? player = capi.World?.Player;
-        if (player is null || !WheelWouldReachHotbar())
+        if (player is null)
+        {
+            return;
+        }
+
+        // Selection locked while carrying: scrolling neither exits Open Hand
+        // nor cycles slots (CarryOn blocks those changes while carrying).
+        if (OpenHandRuntime.IsSelected(player) && CarryOnInterop.IsCarryingHands(player.Entity))
+        {
+            if (WheelWouldReachHotbar())
+            {
+                args.SetHandled();
+            }
+
+            return;
+        }
+
+        if (!WheelWouldReachHotbar())
         {
             return;
         }
@@ -291,7 +375,8 @@ internal sealed class OpenHandClientController : IDisposable
     private EnumHandling OnBeforeActiveSlotChanged(ActiveSlotChangeEventArgs change)
     {
         IClientPlayer? player = capi.World?.Player;
-        if (player is not null && OpenHandRuntime.IsSelected(player))
+        if (player is not null && OpenHandRuntime.IsSelected(player) &&
+            !CarryOnInterop.IsCarryingHands(player.Entity))
         {
             RequestSelection(false, change.ToSlot, player);
         }
@@ -341,7 +426,9 @@ internal sealed class OpenHandClientController : IDisposable
         }
 
         disposed = true;
+        capi.Event.UnregisterGameTickListener(sweepListenerId);
         capi.Event.MouseWheelMove -= OnMouseWheelMove;
+        capi.Event.MouseDown -= OnMouseDown;
         capi.Event.BeforeActiveSlotChanged -= OnBeforeActiveSlotChanged;
         capi.Event.KeyDown -= OnKeyDown;
         capi.Event.LeftWorld -= OnLeftWorld;

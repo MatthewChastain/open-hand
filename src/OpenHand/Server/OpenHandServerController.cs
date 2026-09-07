@@ -9,6 +9,7 @@ internal sealed class OpenHandServerController : IDisposable
     private const string ChannelName = "openhand";
     private readonly IServerNetworkChannel channel;
     private readonly ICoreServerAPI sapi;
+    private long sweepListenerId;
     private bool disposed;
 
     public OpenHandServerController(ICoreServerAPI sapi)
@@ -21,7 +22,16 @@ internal sealed class OpenHandServerController : IDisposable
 
         sapi.Event.PlayerJoin += OnPlayerJoin;
         sapi.Event.PlayerLeave += OnPlayerLeave;
+
+        // Server-side half of the substituted-slot sweep: CarryOn's server
+        // place-down leaves the placed block's stack in the active hand slot
+        // and its pick-up strands a LockedItemSlot wrapper in the mod-owned
+        // inventory (see OpenHandRuntime.SweepSubstitutedSlot).
+        sweepListenerId = sapi.Event.RegisterGameTickListener(
+            OnGameTick, 0, 0);
     }
+
+    private void OnGameTick(float deltaTime) => OpenHandRuntime.SweepSubstitutedSlot();
 
     private void OnSelectionRequest(IServerPlayer player, OpenHandSelectionRequest request)
     {
@@ -81,6 +91,7 @@ internal sealed class OpenHandServerController : IDisposable
         }
 
         disposed = true;
+        sapi.Event.UnregisterGameTickListener(sweepListenerId);
         sapi.Event.PlayerJoin -= OnPlayerJoin;
         sapi.Event.PlayerLeave -= OnPlayerLeave;
         OpenHandRuntime.ClearAll();

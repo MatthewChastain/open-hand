@@ -70,6 +70,28 @@ internal static class HudHotbarPatch
 
     private static string lastPlacementDescription = "not rendered yet";
 
+    // The cell rect as actually rendered in the most recent frame. Published
+    // for click interception (OpenHandClientController.OnMouseDown); invalidated
+    // on every path that does not draw the icon.
+    private static bool indicatorRectValid;
+    private static int indicatorX;
+    private static int indicatorY;
+    private static int indicatorSize;
+
+    // The rendered extent of the hotbar grid's cells on the indicator's row,
+    // in final screen coordinates (centering included). Published alongside
+    // the cell rect for CarryOn's anchor correction.
+    private static bool rowExtentValid;
+    private static int rowLeft;
+    private static int rowRight;
+
+    // The visible hotbar background edges (the Open Hand extension included),
+    // published alongside the row extent: CarryOn's icon gap is measured
+    // against the background edge, not the outermost cell.
+    private static bool backgroundEdgesValid;
+    private static int backgroundLeftEdge;
+    private static int backgroundRightEdge;
+
     internal static void ApplyConfig(OpenHandClientConfig value, IconAnchorMode mode)
     {
         config = value;
@@ -129,6 +151,28 @@ internal static class HudHotbarPatch
             $"hooks={(centeringHooksAvailable ? "ready" : "unavailable")} ({centeringStatus})";
     }
 
+    internal static bool TryGetIndicatorRect(out int x, out int y, out int size)
+    {
+        x = indicatorX;
+        y = indicatorY;
+        size = indicatorSize;
+        return indicatorRectValid;
+    }
+
+    internal static bool TryGetHotbarRowExtent(out int left, out int right)
+    {
+        left = rowLeft;
+        right = rowRight;
+        return rowExtentValid;
+    }
+
+    internal static bool TryGetHotbarBackgroundEdges(out int left, out int right)
+    {
+        left = backgroundLeftEdge;
+        right = backgroundRightEdge;
+        return backgroundEdgesValid;
+    }
+
     internal static MethodBase? TargetMethod()
     {
         Type? type = AccessTools.TypeByName("Vintagestory.Client.NoObf.HudHotbar");
@@ -152,6 +196,9 @@ internal static class HudHotbarPatch
     {
         DetachContinuousBackground(recompose: false);
         centeringBlockedComposer = null;
+        indicatorRectValid = false;
+        rowExtentValid = false;
+        backgroundEdgesValid = false;
         ResetIconTexture();
     }
 
@@ -455,6 +502,11 @@ internal static class HudHotbarPatch
 
     private static void Postfix(object __instance)
     {
+        // The rect describes what is on screen NOW; every early return below
+        // leaves it invalid so clicks pass through while nothing is drawn.
+        indicatorRectValid = false;
+        rowExtentValid = false;
+        backgroundEdgesValid = false;
         if (!config.ShowIndicator)
         {
             return;
@@ -509,6 +561,51 @@ internal static class HudHotbarPatch
         // The Open Hand frame and glyph at the anchor-resolved position.
         capi.Render.Render2DTexture(iconFrameTexture.TextureId, x, y, size, size, 50f);
         capi.Render.Render2DTexture(iconGlyphTexture.TextureId, x, y, size, size, 51f);
+
+        indicatorX = x;
+        indicatorY = y;
+        indicatorSize = size;
+        indicatorRectValid = true;
+
+        rowLeft = int.MaxValue;
+        rowRight = int.MinValue;
+        if (grid.SlotBounds is { Length: > 0 } rowBounds)
+        {
+            int slotZeroY = (int)slotZero.renderY;
+            foreach (ElementBounds bound in rowBounds)
+            {
+                // Same row filter as CollectRowIntervals: cells on other rows
+                // (bag slots above the bar) do not bound the hotbar row.
+                if (bound is null || Math.Abs((int)bound.renderY - slotZeroY) > size / 2)
+                {
+                    continue;
+                }
+
+                rowLeft = Math.Min(rowLeft, (int)bound.renderX);
+                rowRight = Math.Max(rowRight, (int)bound.renderX + bound.OuterWidthInt);
+            }
+        }
+
+        rowExtentValid = rowLeft < rowRight;
+
+        // The background edges are what other HUDs should measure their gaps
+        // against: the vanilla background wraps the cells with padding, and
+        // the Open Hand extension moves the visible left edge further left.
+        if (__instance is GuiDialog bgDialog &&
+            bgDialog.Composers["hotbar"] is GuiComposer bgComposer &&
+            TryGetHotbarBackgroundBounds(__instance, out ElementBounds bgBounds))
+        {
+            int bgLeftEdge = (int)bgComposer.Bounds.renderX + (int)bgBounds.bgDrawX;
+            int bgRightEdge = bgLeftEdge + (int)bgBounds.OuterWidth;
+            if (ReferenceEquals(bgComposer, extendedComposer) && continuousBackground is not null)
+            {
+                bgLeftEdge = Math.Min(bgLeftEdge, (int)bgComposer.Bounds.renderX - continuousBackground.ExtensionWidth);
+            }
+
+            backgroundEdgesValid = bgLeftEdge < bgRightEdge;
+            backgroundLeftEdge = bgLeftEdge;
+            backgroundRightEdge = bgRightEdge;
+        }
 
         // While selected, layer vanilla's own active slot highlight texture,
         // drawn exactly the way the slot grid draws it (2px overscan, z 50).

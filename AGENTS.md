@@ -32,17 +32,28 @@ without Vintage Story DLLs.
 `Directory.Build.props` sets `TreatWarningsAsErrors` — code must compile
 warning-free under `net10.0` with nullable enabled.
 
+Verifying game internals: decompile with `~/.dotnet/tools/ilspycmd -t <full type
+name>` against the install in `Local.props`. `VintagestoryLib.dll` holds the
+client internals (`ClientMain`, `GuiManager`, `HudHotbar`, `HotkeyManager` —
+note the `.NoObf` namespace); `VintagestoryAPI.dll` holds the public API
+surface. Client internals and API behavior are stable across 1.22.x, but
+re-verify anything version-sensitive after a game update.
+
 ## Layout
 
 - `src/OpenHand/OpenHandModSystem.cs` — mod entry point: applies Harmony patches, registers the `/openhand status` command
-- `src/OpenHand/Common/` — shared runtime state (`OpenHandRuntime`, wheel-ring order)
+- `src/OpenHand/Common/` — shared runtime state (`OpenHandRuntime`), pure decision
+  logic (`OpenHandWheelRing`, `OpenHandDoubleTap`), and the client config
 - `src/OpenHand/Client/` — hotkey registration, wheel input, HUD icon rendering, in-game settings dialog
 - `src/OpenHand/Server/` — server authority and selection broadcast
-- `src/OpenHand/Patches/` — the only two Harmony patches in the mod
+- `src/OpenHand/Patches/` — the mod's Harmony patches: the two vanilla-target
+  patches below, plus the optional CarryOn HUD patch
 - `src/OpenHand/modinfo.json` — the authoritative mod manifest (see Packaging)
 - `assets/` — assets shipped in the mod zip (HUD texture, mod icon)
 - `assets-src/` — design sources, fully tracked on purpose
-- `tests/OpenHand.StateTests/` — state tests (required check)
+- `tests/OpenHand.StateTests/` — state tests (required check). Links individual
+  `Common/` sources via its csproj `<Compile>` list: every new `Common/` file must
+  be added there or the test project fails to build (CI catches it).
 - `scripts/package.py` — deterministic release zip packaging
 - `scripts/setup-branch-protection.sh` — re-applies GitHub branch protection
 
@@ -55,16 +66,40 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   (`src/OpenHand/Patches/ActiveHandPatch.cs`), not by adding or editing slots.
   Item stacks must remain untouched in every code path.
 - **The substituted slot satisfies vanilla slot contracts.** While selected,
-  `ActiveHotbarSlot` returns a shared empty slot that still reports the
-  caller's hotbar inventory (`Inventory` non-null; `GetSlotId` returns -1).
-  Third-party mods dereference `slot.Inventory` every tick (Overhaul lib
-  legacy compat crashed on a null inventory there).
-- **Only two patch targets exist**: the `ActiveHotbarSlot` getter and
+  `ActiveHotbarSlot` returns a shared empty slot that is a real member
+  (index 0) of a mod-owned one-slot `DummyInventory` (`Inventory` non-null;
+  `GetSlotId` returns 0). Third-party mods dereference `slot.Inventory` every
+  tick (Overhaul lib legacy compat crashed on a null inventory there), and
+  CarryOn's `LockedItemSlot` constructor searches `slot.Inventory` by
+  reference identity and throws when the slot is not a member — the 1.0.1
+  build attached the player's hotbar inventory without membership and
+  crashed on chest pick-up. Do not re-point the slot at the player's own
+  inventories or hand it out unattached. Do not hand out the current index-0
+  occupant either: CarryOn's pick-up replaces the occupant with a
+  `LockedItemSlot` wrapper and stacks leak through that wrapper into engine
+  item-move paths, duplicating items — tried and reverted.
+- **Only two vanilla patch targets exist**: the `ActiveHotbarSlot` getter and
   `HudHotbar.OnRenderGUI` (plus reading its private `hotbarSlotGrid` field) in
   `src/OpenHand/Patches/HudHotbarPatch.cs`. Patches resolve private members via
   `AccessTools` reflection, and `TargetMethod()` deliberately returns `null`
   (patch silently no-ops, logged) instead of throwing when a target is missing —
   the mod degrades gracefully rather than crashing. Keep that behavior.
+- **Third-party compatibility patches are allowed, but only as a last
+  resort.** Try the simpler tools first — public APIs, engine events,
+  reflection reads, or the other mod's own configuration — and patch another
+  mod's internals only when the interaction cannot be handled any other way.
+  Every compatibility patch must stay optional and degrade to a no-op:
+  `TargetMethod()` returns null when the mod is absent, renamed internals
+  pass original behavior through untouched, and each target is verified
+  against decompiled assemblies of the mod's shipping version (include the
+  evidence in the PR; re-verify on mod updates). Document every target here.
+  Current target: `CarryOnHudPatch` postfixes CarryOn's private
+  `HudCarried+HudCarriedRenderer.GetPositionForAnchor` so carried-item icons
+  clear the indicator cell and follow the real hotbar (CarryOn hardcodes a
+  vanilla-centered 850px bar). Verified against decompiled CarryOn 1.14.3;
+  re-verify on CarryOn updates. Every guarded path and the first successful
+  repositioning per side log once per session, so a "the icons didn't move"
+  report is diagnosable from `client-main.log` without a debugger.
 - **Patch targets are verified against decompiled 1.22.7 assemblies.** Changes to
   patch targets or game-version assumptions must include decompile evidence in the PR.
 - **Same-value slot assignment is a no-op in vanilla.** Setting
@@ -86,6 +121,27 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   writes and yield rather than repeatedly overriding another mod's layout.
 - **Patch registration must be idempotent.** Client and server startup can share
   a process; registering the same Harmony patch twice duplicates draw calls.
+- **Digit-key interception rides `capi.Event.KeyDown`, not hotkey registration.**
+  Vanilla's `hotbarslot1-10` handlers return `true` and `HotkeyManager` stops at
+  the first handler that does, so a mod hotkey bound to the same keys never fires.
+  `KeyDown` reaches mod listeners *before* hotkey dispatch (verified against
+  1.22.7 `ClientMain.OnKeyDown`); a listener must leave `args.Handled` untouched,
+  apply its own capture-inputs dialog filter (the event fires even while chat
+  captures input), and yield when a hovered slot would turn the press into an
+  inventory swap. Resolve presses against the live `hotbarslot` bindings
+  (`capi.Input.HotKeys`) so user rebinds are honored. While Open Hand is
+  selected, `ActiveHotbarSlotNumber` still reports the remembered physical slot.
+  See `OpenHandDoubleTap` + `OpenHandClientController.OnKeyDown` for the pattern.
+- **Indicator click interception rides `capi.Event.MouseDown`, not the GUI.**
+  `api.eventapi.TriggerMouseDown` fires before any client system or dialog
+  sees the click (verified against 1.22.7 `ClientMain.UpdateMouseButtonState`),
+  so `OpenHandClientController.OnMouseDown` can guard a cursor-held stack from
+  `HudDropItem`, which drops stacks clicked outside every opened composer's
+  root bounds — where the indicator cell is drawn. The handler must keep the
+  guard order: skip when already handled, indicator hidden, mouse grabbed,
+  capture-inputs dialogs open, outside the rect from
+  `HudHotbarPatch.TryGetIndicatorRect`, or inside an open dialog's composer
+  bounds. With an empty cursor it toggles Open Hand like the hotkey.
 
 ## Compatibility policy
 
@@ -94,6 +150,32 @@ These are load-bearing design decisions. Do not weaken them without discussion.
 - Building the game itself requires the .NET 10 SDK (game requirement since 1.22).
 - Known conflict: Forever Empty (both mods modify selected-hand behavior; Open Hand
   warns on startup). Mods that cache or alter `ActiveHotbarSlot` may also conflict.
+- CarryOn is supported: slot membership since 1.0.2 (no crash on container
+  pick-up), and since 1.0.3 `CarryOnHudPatch` repositions its carried-item HUD
+  anchors, which are hardcoded to a vanilla-centered 850px bar and otherwise
+  collide with the indicator cell. A CarryOn update that renames its HUD
+  internals disables only that correction (logged), never the rest of the mod.
+- While carrying, Open Hand locks the selection to itself: scrolling is
+  swallowed before vanilla slot cycling, digit keys pass through untouched
+  (never set `Handled` in the KeyDown listener — it receives every key and
+  swallowing strands movement and escape), the same-slot double-tap does not
+  exit, slot-change attempts do not deselect, and toggling off is blocked
+  until the block is placed. CarryOn cancels those slot changes anyway, and
+  exiting mid-carry strands the player on a slot that cannot place the block.
+  Carry state is reflection-read from CarryOn's `GetCarried` extension
+  (`OpenHand.Client.CarryOnInterop`); a missing or renamed API simply reports
+  not-carrying, never breaks Open Hand's own input handling.
+- CarryOn's placement transaction leaves two artifacts in the substituted
+  slot, both reclaimed by `OpenHandRuntime.SweepSubstitutedSlot()` every game
+  tick (client and server): the placed block's stack stays in the active hand
+  slot after a successful place-down (CarryOn clears it on failure but not on
+  success, and vanilla `TryPlaceBlock` does not consume it), which otherwise
+  duplicates the block on the next interaction; and pick-up replaces the
+  mod-owned inventory's index-0 occupant with a `LockedItemSlot` wrapper,
+  which otherwise crashes the next pick-up. The sweep is why the substituted
+  slot must always be handed out directly (see the slot-contract invariant):
+  exposing the wrapper instead leaks stacks into engine item-move paths and
+  duplicates items — tried and reverted.
 
 ## Packaging
 
@@ -118,7 +200,12 @@ rejects other formats ("The NetworkVersion of this mod ... is malformed").
 - To release: bump `version` in **both** `src/OpenHand/modinfo.json` and
   `src/OpenHand/OpenHand.csproj`, merge `develop` into `main`, tag `v<version>`,
   build locally with `scripts/package.py`, and attach the zip to the GitHub release.
-  The Release workflow fails if the tag does not match the modinfo version.
+  The Release workflow only validates the tag/version match — creating the GitHub
+  release and attaching the zip is done manually with `gh release create`.
+- The Mod DB page (description, changelog) is maintained by hand in a browser as
+  HTML — agents cannot log in there. Supply paste-ready HTML copy (description
+  sections use `<h3>`/`<ul>`/`<li>` with `<code>` for commands) and remind the
+  owner to upload the new zip and switch the page's download to it.
 
 ## Local test instance
 
