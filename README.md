@@ -20,6 +20,7 @@ Built and tested against Vintage Story **1.22.7**, and the packaged mod declares
 - Any number key or hotbar click leaves Open Hand.
 - With **slot key double-tap** enabled (off by default), pressing the number key of the already-active slot selects Open Hand — and while Open Hand is selected, that same key returns to the slot even though vanilla sees no slot change.
 - Wheel scrolling works normally in dialogs and vanilla backpack mode.
+- Clicking the indicator cell toggles Open Hand, just like the hotkey. If you are holding an item stack on the mouse cursor, the click is swallowed instead — the stack is never dropped by clicking the indicator.
 
 While Open Hand is selected the engine resolves the main hand as empty. The ten physical hotbar slots and the offhand are never touched.
 
@@ -83,7 +84,7 @@ The optional local API/render regression suite requires the game installation an
 
 ## Compatibility
 
-Do not run alongside Forever Empty; both mods modify selected-hand behavior, and Open Hand warns about the conflict on startup. Overhaul lib legacy compat works as of 1.0.0: the substituted hand slot now satisfies vanilla slot contracts (`Inventory` is always populated), which that mod's per-tick hand checks rely on. Mods that cache or alter `ActiveHotbarSlot` directly may still need compatibility work — open an issue with a minimal reproduction and your Vintage Story version.
+Do not run alongside Forever Empty; both mods modify selected-hand behavior, and Open Hand warns about the conflict on startup. Overhaul lib legacy compat works as of 1.0.0: the substituted hand slot now satisfies vanilla slot contracts (`Inventory` is always populated), which that mod's per-tick hand checks rely on. CarryOn works as of 1.0.2: the substituted hand slot is a real member of a mod-owned inventory, satisfying CarryOn's slot identity check, so picking up containers while Open Hand is selected no longer crashes. Mods that cache or alter `ActiveHotbarSlot` directly may still need compatibility work — open an issue with a minimal reproduction and your Vintage Story version.
 
 ## Contributing
 

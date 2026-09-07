@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>OpenHand</AssemblyName>
     <RootNamespace>OpenHand</RootNamespace>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
   </PropertyGroup>
   <ItemGroup>

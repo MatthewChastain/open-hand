@@ -69,9 +69,51 @@ internal sealed class OpenHandClientController : IDisposable
         });
 
         capi.Event.MouseWheelMove += OnMouseWheelMove;
+        capi.Event.MouseDown += OnMouseDown;
         capi.Event.BeforeActiveSlotChanged += OnBeforeActiveSlotChanged;
         capi.Event.KeyDown += OnKeyDown;
         capi.Event.LeftWorld += OnLeftWorld;
+    }
+
+    // Fires from api.eventapi.TriggerMouseDown before any client system or
+    // dialog sees the click (verified against 1.22.7 ClientMain
+    // .UpdateMouseButtonState), so handling here protects a cursor-held stack
+    // from HudDropItem, which drops stacks clicked outside every opened
+    // composer's root bounds — exactly where the indicator cell sits. With an
+    // empty cursor the click toggles Open Hand like the hotkey does.
+    private void OnMouseDown(MouseEvent args)
+    {
+        if (args.Handled || !isIndicatorVisible() || capi.Input.MouseGrabbed)
+        {
+            return;
+        }
+
+        IClientPlayer? player = capi.World?.Player;
+        if (player is null || DialogsCaptureInputs() ||
+            !HudHotbarPatch.TryGetIndicatorRect(out int x, out int y, out int size) ||
+            args.X < x || args.X >= x + size || args.Y < y || args.Y >= y + size)
+        {
+            return;
+        }
+
+        // The same guard HudDropItem applies: never steal clicks that belong
+        // to an open dialog's interactive area.
+        foreach (GuiDialog openedDialog in capi.Gui.OpenedGuis)
+        {
+            foreach (GuiComposer composer in openedDialog.Composers.Values)
+            {
+                if (composer.Bounds.PointInside(args.X, args.Y))
+                {
+                    return;
+                }
+            }
+        }
+
+        args.Handled = true;
+        if (player.InventoryManager.MouseItemSlot is not { Empty: false })
+        {
+            SelectOpenHand(player);
+        }
     }
 
     // Vanilla's hotbarslot1-10 handlers return true and the hotkey dispatcher
@@ -342,6 +384,7 @@ internal sealed class OpenHandClientController : IDisposable
 
         disposed = true;
         capi.Event.MouseWheelMove -= OnMouseWheelMove;
+        capi.Event.MouseDown -= OnMouseDown;
         capi.Event.BeforeActiveSlotChanged -= OnBeforeActiveSlotChanged;
         capi.Event.KeyDown -= OnKeyDown;
         capi.Event.LeftWorld -= OnLeftWorld;

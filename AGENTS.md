@@ -65,10 +65,15 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   (`src/OpenHand/Patches/ActiveHandPatch.cs`), not by adding or editing slots.
   Item stacks must remain untouched in every code path.
 - **The substituted slot satisfies vanilla slot contracts.** While selected,
-  `ActiveHotbarSlot` returns a shared empty slot that still reports the
-  caller's hotbar inventory (`Inventory` non-null; `GetSlotId` returns -1).
-  Third-party mods dereference `slot.Inventory` every tick (Overhaul lib
-  legacy compat crashed on a null inventory there).
+  `ActiveHotbarSlot` returns a shared empty slot that is a real member
+  (index 0) of a mod-owned one-slot `DummyInventory` (`Inventory` non-null;
+  `GetSlotId` returns 0). Third-party mods dereference `slot.Inventory` every
+  tick (Overhaul lib legacy compat crashed on a null inventory there), and
+  CarryOn's `LockedItemSlot` constructor searches `slot.Inventory` by
+  reference identity and throws when the slot is not a member — the 1.0.1
+  build attached the player's hotbar inventory without membership and
+  crashed on chest pick-up. Do not re-point the slot at the player's own
+  inventories or hand it out unattached.
 - **Only two patch targets exist**: the `ActiveHotbarSlot` getter and
   `HudHotbar.OnRenderGUI` (plus reading its private `hotbarSlotGrid` field) in
   `src/OpenHand/Patches/HudHotbarPatch.cs`. Patches resolve private members via
@@ -107,6 +112,16 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   (`capi.Input.HotKeys`) so user rebinds are honored. While Open Hand is
   selected, `ActiveHotbarSlotNumber` still reports the remembered physical slot.
   See `OpenHandDoubleTap` + `OpenHandClientController.OnKeyDown` for the pattern.
+- **Indicator click interception rides `capi.Event.MouseDown`, not the GUI.**
+  `api.eventapi.TriggerMouseDown` fires before any client system or dialog
+  sees the click (verified against 1.22.7 `ClientMain.UpdateMouseButtonState`),
+  so `OpenHandClientController.OnMouseDown` can guard a cursor-held stack from
+  `HudDropItem`, which drops stacks clicked outside every opened composer's
+  root bounds — where the indicator cell is drawn. The handler must keep the
+  guard order: skip when already handled, indicator hidden, mouse grabbed,
+  capture-inputs dialogs open, outside the rect from
+  `HudHotbarPatch.TryGetIndicatorRect`, or inside an open dialog's composer
+  bounds. With an empty cursor it toggles Open Hand like the hotkey.
 
 ## Compatibility policy
 

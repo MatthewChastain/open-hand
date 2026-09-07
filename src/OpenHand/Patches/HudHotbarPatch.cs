@@ -70,6 +70,14 @@ internal static class HudHotbarPatch
 
     private static string lastPlacementDescription = "not rendered yet";
 
+    // The cell rect as actually rendered in the most recent frame. Published
+    // for click interception (OpenHandClientController.OnMouseDown); invalidated
+    // on every path that does not draw the icon.
+    private static bool indicatorRectValid;
+    private static int indicatorX;
+    private static int indicatorY;
+    private static int indicatorSize;
+
     internal static void ApplyConfig(OpenHandClientConfig value, IconAnchorMode mode)
     {
         config = value;
@@ -129,6 +137,14 @@ internal static class HudHotbarPatch
             $"hooks={(centeringHooksAvailable ? "ready" : "unavailable")} ({centeringStatus})";
     }
 
+    internal static bool TryGetIndicatorRect(out int x, out int y, out int size)
+    {
+        x = indicatorX;
+        y = indicatorY;
+        size = indicatorSize;
+        return indicatorRectValid;
+    }
+
     internal static MethodBase? TargetMethod()
     {
         Type? type = AccessTools.TypeByName("Vintagestory.Client.NoObf.HudHotbar");
@@ -152,6 +168,7 @@ internal static class HudHotbarPatch
     {
         DetachContinuousBackground(recompose: false);
         centeringBlockedComposer = null;
+        indicatorRectValid = false;
         ResetIconTexture();
     }
 
@@ -455,6 +472,9 @@ internal static class HudHotbarPatch
 
     private static void Postfix(object __instance)
     {
+        // The rect describes what is on screen NOW; every early return below
+        // leaves it invalid so clicks pass through while nothing is drawn.
+        indicatorRectValid = false;
         if (!config.ShowIndicator)
         {
             return;
@@ -509,6 +529,11 @@ internal static class HudHotbarPatch
         // The Open Hand frame and glyph at the anchor-resolved position.
         capi.Render.Render2DTexture(iconFrameTexture.TextureId, x, y, size, size, 50f);
         capi.Render.Render2DTexture(iconGlyphTexture.TextureId, x, y, size, size, 51f);
+
+        indicatorX = x;
+        indicatorY = y;
+        indicatorSize = size;
+        indicatorRectValid = true;
 
         // While selected, layer vanilla's own active slot highlight texture,
         // drawn exactly the way the slot grid draws it (2px overscan, z 50).
