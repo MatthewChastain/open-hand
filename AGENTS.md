@@ -32,17 +32,27 @@ without Vintage Story DLLs.
 `Directory.Build.props` sets `TreatWarningsAsErrors` — code must compile
 warning-free under `net10.0` with nullable enabled.
 
+Verifying game internals: decompile with `~/.dotnet/tools/ilspycmd -t <full type
+name>` against the install in `Local.props`. `VintagestoryLib.dll` holds the
+client internals (`ClientMain`, `GuiManager`, `HudHotbar`, `HotkeyManager` —
+note the `.NoObf` namespace); `VintagestoryAPI.dll` holds the public API
+surface. Client internals and API behavior are stable across 1.22.x, but
+re-verify anything version-sensitive after a game update.
+
 ## Layout
 
 - `src/OpenHand/OpenHandModSystem.cs` — mod entry point: applies Harmony patches, registers the `/openhand status` command
-- `src/OpenHand/Common/` — shared runtime state (`OpenHandRuntime`, wheel-ring order)
+- `src/OpenHand/Common/` — shared runtime state (`OpenHandRuntime`), pure decision
+  logic (`OpenHandWheelRing`, `OpenHandDoubleTap`), and the client config
 - `src/OpenHand/Client/` — hotkey registration, wheel input, HUD icon rendering, in-game settings dialog
 - `src/OpenHand/Server/` — server authority and selection broadcast
 - `src/OpenHand/Patches/` — the only two Harmony patches in the mod
 - `src/OpenHand/modinfo.json` — the authoritative mod manifest (see Packaging)
 - `assets/` — assets shipped in the mod zip (HUD texture, mod icon)
 - `assets-src/` — design sources, fully tracked on purpose
-- `tests/OpenHand.StateTests/` — state tests (required check)
+- `tests/OpenHand.StateTests/` — state tests (required check). Links individual
+  `Common/` sources via its csproj `<Compile>` list: every new `Common/` file must
+  be added there or the test project fails to build (CI catches it).
 - `scripts/package.py` — deterministic release zip packaging
 - `scripts/setup-branch-protection.sh` — re-applies GitHub branch protection
 
@@ -86,6 +96,17 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   writes and yield rather than repeatedly overriding another mod's layout.
 - **Patch registration must be idempotent.** Client and server startup can share
   a process; registering the same Harmony patch twice duplicates draw calls.
+- **Digit-key interception rides `capi.Event.KeyDown`, not hotkey registration.**
+  Vanilla's `hotbarslot1-10` handlers return `true` and `HotkeyManager` stops at
+  the first handler that does, so a mod hotkey bound to the same keys never fires.
+  `KeyDown` reaches mod listeners *before* hotkey dispatch (verified against
+  1.22.7 `ClientMain.OnKeyDown`); a listener must leave `args.Handled` untouched,
+  apply its own capture-inputs dialog filter (the event fires even while chat
+  captures input), and yield when a hovered slot would turn the press into an
+  inventory swap. Resolve presses against the live `hotbarslot` bindings
+  (`capi.Input.HotKeys`) so user rebinds are honored. While Open Hand is
+  selected, `ActiveHotbarSlotNumber` still reports the remembered physical slot.
+  See `OpenHandDoubleTap` + `OpenHandClientController.OnKeyDown` for the pattern.
 
 ## Compatibility policy
 
@@ -118,7 +139,12 @@ rejects other formats ("The NetworkVersion of this mod ... is malformed").
 - To release: bump `version` in **both** `src/OpenHand/modinfo.json` and
   `src/OpenHand/OpenHand.csproj`, merge `develop` into `main`, tag `v<version>`,
   build locally with `scripts/package.py`, and attach the zip to the GitHub release.
-  The Release workflow fails if the tag does not match the modinfo version.
+  The Release workflow only validates the tag/version match — creating the GitHub
+  release and attaching the zip is done manually with `gh release create`.
+- The Mod DB page (description, changelog) is maintained by hand in a browser as
+  HTML — agents cannot log in there. Supply paste-ready HTML copy (description
+  sections use `<h3>`/`<ul>`/`<li>` with `<code>` for commands) and remind the
+  owner to upload the new zip and switch the page's download to it.
 
 ## Local test instance
 
