@@ -145,15 +145,6 @@ internal sealed class OpenHandClientController : IDisposable
             return;
         }
 
-        // While carrying, the selection is locked to Open Hand: CarryOn
-        // blocks slot changes anyway, and exiting would strand the carried
-        // block on a slot that cannot place it.
-        if (OpenHandRuntime.IsSelected(player) && CarryOnInterop.IsCarryingHands(player.Entity))
-        {
-            args.Handled = true;
-            return;
-        }
-
         if (!isDoubleTapEnabled())
         {
             return;
@@ -183,7 +174,13 @@ internal sealed class OpenHandClientController : IDisposable
                 SelectOpenHand(player);
                 break;
             case OpenHandDoubleTap.DoubleTapAction.ExitToSlot:
-                DeselectToSlot(player, decision.Destination);
+                // Selection locked while carrying: CarryOn cancels the slot
+                // change anyway, and exiting would strand the carried block.
+                if (!CarryOnInterop.IsCarryingHands(player.Entity))
+                {
+                    DeselectToSlot(player, decision.Destination);
+                }
+
                 break;
         }
     }
