@@ -46,7 +46,8 @@ re-verify anything version-sensitive after a game update.
   logic (`OpenHandWheelRing`, `OpenHandDoubleTap`), and the client config
 - `src/OpenHand/Client/` — hotkey registration, wheel input, HUD icon rendering, in-game settings dialog
 - `src/OpenHand/Server/` — server authority and selection broadcast
-- `src/OpenHand/Patches/` — the only two Harmony patches in the mod
+- `src/OpenHand/Patches/` — the mod's Harmony patches: the two vanilla-target
+  patches below, plus the optional CarryOn HUD patch
 - `src/OpenHand/modinfo.json` — the authoritative mod manifest (see Packaging)
 - `assets/` — assets shipped in the mod zip (HUD texture, mod icon)
 - `assets-src/` — design sources, fully tracked on purpose
@@ -96,7 +97,9 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   `HudCarried+HudCarriedRenderer.GetPositionForAnchor` so carried-item icons
   clear the indicator cell and follow the real hotbar (CarryOn hardcodes a
   vanilla-centered 850px bar). Verified against decompiled CarryOn 1.14.3;
-  re-verify on CarryOn updates.
+  re-verify on CarryOn updates. Every guarded path and the first successful
+  repositioning per side log once per session, so a "the icons didn't move"
+  report is diagnosable from `client-main.log` without a debugger.
 - **Patch targets are verified against decompiled 1.22.7 assemblies.** Changes to
   patch targets or game-version assumptions must include decompile evidence in the PR.
 - **Same-value slot assignment is a no-op in vanilla.** Setting
