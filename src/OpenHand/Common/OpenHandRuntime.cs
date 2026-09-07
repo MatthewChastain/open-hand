@@ -32,31 +32,23 @@ public static class OpenHandRuntime
     // the instance when the world changes.
     public static ItemSlot EmptySlotFor(IPlayer player)
     {
-        DummyInventory inventory = EnsureContainingInventory(player.Entity.Api);
-        // Hand out the CURRENT occupant of index 0, not our slot directly:
-        // CarryOn's lock feature replaces the occupant with a LockedItemSlot
-        // wrapper on pick-up and restores it through the same getter on
-        // put-down. Returning the occupant keeps that round-trip working
-        // through the substituted getter (and returning our own slot there
-        // instead left the wrapper stranded, crashing the next pick-up).
-        ItemSlot occupant = inventory[0];
-        return occupant ?? EmptyHandSlot;
+        EnsureContainingInventory(player.Entity.Api);
+        return EmptyHandSlot;
     }
 
-    private static DummyInventory EnsureContainingInventory(ICoreAPI api)
+    private static void EnsureContainingInventory(ICoreAPI api)
     {
         lock (InventoryLock)
         {
             if (containingInventory is not null && ReferenceEquals(containingInventory.Api, api))
             {
-                return containingInventory;
+                return;
             }
 
             DummyInventory inventory = new(api);
             inventory[0] = EmptyHandSlot;
             EmptyHandSlot.AttachInventory(inventory);
             containingInventory = inventory;
-            return inventory;
         }
     }
 
@@ -80,16 +72,10 @@ public static class OpenHandRuntime
 
         // The shared empty-hand slot must never carry an item into the next
         // selection: if any engine code wrote to ActiveHotbarSlot while Open
-        // Hand was selected, drop it here. Clear the current occupant too —
-        // it is usually the slot itself, but third parties (CarryOn's lock
-        // wrapper) may have replaced it.
+        // Hand was selected, drop it here.
         if (next.IsSelected)
         {
             EmptyHandSlot.Itemstack = null;
-            lock (InventoryLock)
-            {
-                containingInventory?[0].Itemstack = null;
-            }
         }
 
         States.AddOrUpdate(player.PlayerUID, next, (_, current) => revision >= current.Revision ? next : current);
