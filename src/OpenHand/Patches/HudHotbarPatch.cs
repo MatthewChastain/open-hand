@@ -78,6 +78,13 @@ internal static class HudHotbarPatch
     private static int indicatorY;
     private static int indicatorSize;
 
+    // The rendered extent of the hotbar grid's cells on the indicator's row,
+    // in final screen coordinates (centering included). Published alongside
+    // the cell rect for CarryOn's anchor correction.
+    private static bool rowExtentValid;
+    private static int rowLeft;
+    private static int rowRight;
+
     internal static void ApplyConfig(OpenHandClientConfig value, IconAnchorMode mode)
     {
         config = value;
@@ -145,6 +152,13 @@ internal static class HudHotbarPatch
         return indicatorRectValid;
     }
 
+    internal static bool TryGetHotbarRowExtent(out int left, out int right)
+    {
+        left = rowLeft;
+        right = rowRight;
+        return rowExtentValid;
+    }
+
     internal static MethodBase? TargetMethod()
     {
         Type? type = AccessTools.TypeByName("Vintagestory.Client.NoObf.HudHotbar");
@@ -169,6 +183,7 @@ internal static class HudHotbarPatch
         DetachContinuousBackground(recompose: false);
         centeringBlockedComposer = null;
         indicatorRectValid = false;
+        rowExtentValid = false;
         ResetIconTexture();
     }
 
@@ -475,6 +490,7 @@ internal static class HudHotbarPatch
         // The rect describes what is on screen NOW; every early return below
         // leaves it invalid so clicks pass through while nothing is drawn.
         indicatorRectValid = false;
+        rowExtentValid = false;
         if (!config.ShowIndicator)
         {
             return;
@@ -534,6 +550,27 @@ internal static class HudHotbarPatch
         indicatorY = y;
         indicatorSize = size;
         indicatorRectValid = true;
+
+        rowLeft = int.MaxValue;
+        rowRight = int.MinValue;
+        if (grid.SlotBounds is { Length: > 0 } rowBounds)
+        {
+            int slotZeroY = (int)slotZero.renderY;
+            foreach (ElementBounds bound in rowBounds)
+            {
+                // Same row filter as CollectRowIntervals: cells on other rows
+                // (bag slots above the bar) do not bound the hotbar row.
+                if (bound is null || Math.Abs((int)bound.renderY - slotZeroY) > size / 2)
+                {
+                    continue;
+                }
+
+                rowLeft = Math.Min(rowLeft, (int)bound.renderX);
+                rowRight = Math.Max(rowRight, (int)bound.renderX + bound.OuterWidthInt);
+            }
+        }
+
+        rowExtentValid = rowLeft < rowRight;
 
         // While selected, layer vanilla's own active slot highlight texture,
         // drawn exactly the way the slot grid draws it (2px overscan, z 50).

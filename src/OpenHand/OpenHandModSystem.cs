@@ -72,7 +72,8 @@ public sealed class OpenHandModSystem : ModSystem
     private static readonly Type[] PatchTypes =
     [
         typeof(ActiveHandPatch),
-        typeof(HudHotbarPatch)
+        typeof(HudHotbarPatch),
+        typeof(CarryOnHudPatch)
     ];
 
     private void ApplyPatches(ICoreAPI api)
@@ -84,8 +85,13 @@ public sealed class OpenHandModSystem : ModSystem
             {
                 // Single-player starts both sides in one process. Harmony
                 // appends duplicate patch methods if registered twice.
-                System.Reflection.MethodBase? target = patchType == typeof(ActiveHandPatch)
-                    ? ActiveHandPatch.TargetMethod() : HudHotbarPatch.TargetMethod();
+                System.Reflection.MethodBase? target = patchType.Name switch
+                {
+                    nameof(ActiveHandPatch) => ActiveHandPatch.TargetMethod(),
+                    nameof(HudHotbarPatch) => HudHotbarPatch.TargetMethod(),
+                    nameof(CarryOnHudPatch) => CarryOnHudPatch.TargetMethod(),
+                    _ => null
+                };
                 if (target is not null && Harmony.GetPatchInfo(target)?.Owners.Contains(HarmonyId) == true)
                 {
                     AppliedPatches.Add(patchType.Name);

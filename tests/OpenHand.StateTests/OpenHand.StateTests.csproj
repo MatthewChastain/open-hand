@@ -12,5 +12,6 @@
     <Compile Include="../../src/OpenHand/Common/OpenHandClientConfig.cs" Link="OpenHandClientConfig.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandHudGeometry.cs" Link="OpenHandHudGeometry.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandCenteringGeometry.cs" Link="OpenHandCenteringGeometry.cs" />
+    <Compile Include="../../src/OpenHand/Common/OpenHandCarryAnchorSolver.cs" Link="OpenHandCarryAnchorSolver.cs" />
   </ItemGroup>
 </Project>

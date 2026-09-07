@@ -74,12 +74,20 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   build attached the player's hotbar inventory without membership and
   crashed on chest pick-up. Do not re-point the slot at the player's own
   inventories or hand it out unattached.
-- **Only two patch targets exist**: the `ActiveHotbarSlot` getter and
+- **Only two vanilla patch targets exist**: the `ActiveHotbarSlot` getter and
   `HudHotbar.OnRenderGUI` (plus reading its private `hotbarSlotGrid` field) in
   `src/OpenHand/Patches/HudHotbarPatch.cs`. Patches resolve private members via
   `AccessTools` reflection, and `TargetMethod()` deliberately returns `null`
   (patch silently no-ops, logged) instead of throwing when a target is missing —
   the mod degrades gracefully rather than crashing. Keep that behavior.
+- **One guarded third-party patch is allowed**: `CarryOnHudPatch` postfixes
+  CarryOn's private `HudCarried+HudCarriedRenderer.GetPositionForAnchor` so
+  carried-item icons clear the indicator cell and follow the real hotbar
+  (CarryOn hardcodes a vanilla-centered 850px bar). It must stay optional and
+  degrade to a no-op: `TargetMethod()` returns null when CarryOn is absent,
+  and renamed CarryOn internals pass the original positions through untouched.
+  Verified against decompiled CarryOn 1.14.3; re-verify on CarryOn updates.
+  Do not add further third-party patch targets without discussion.
 - **Patch targets are verified against decompiled 1.22.7 assemblies.** Changes to
   patch targets or game-version assumptions must include decompile evidence in the PR.
 - **Same-value slot assignment is a no-op in vanilla.** Setting
@@ -130,6 +138,11 @@ These are load-bearing design decisions. Do not weaken them without discussion.
 - Building the game itself requires the .NET 10 SDK (game requirement since 1.22).
 - Known conflict: Forever Empty (both mods modify selected-hand behavior; Open Hand
   warns on startup). Mods that cache or alter `ActiveHotbarSlot` may also conflict.
+- CarryOn is supported: slot membership since 1.0.2 (no crash on container
+  pick-up), and since 1.0.3 `CarryOnHudPatch` repositions its carried-item HUD
+  anchors, which are hardcoded to a vanilla-centered 850px bar and otherwise
+  collide with the indicator cell. A CarryOn update that renames its HUD
+  internals disables only that correction (logged), never the rest of the mod.
 
 ## Packaging
 
