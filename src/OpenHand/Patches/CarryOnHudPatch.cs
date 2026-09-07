@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using OpenHand.Common;
@@ -15,7 +16,10 @@ namespace OpenHand.Patches;
 // (OpenHandCarryAnchorSolver). Everything is guarded: when CarryOn is not
 // loaded, TargetMethod() returns null and Harmony skips the patch silently;
 // when its internals change, the reflection lookups fail and the original
-// positions pass through untouched.
+// positions pass through untouched. Every guarded path logs once per session
+// (and the first successful repositioning per side logs once too), so a
+// "nothing moved" report in the field is diagnosable from client-main.log
+// without a debugger.
 [HarmonyPatch]
 internal static class CarryOnHudPatch
 {
@@ -33,6 +37,12 @@ internal static class CarryOnHudPatch
             return outer?.GetNestedType("HudCarriedRenderer", BindingFlags.NonPublic | BindingFlags.Public);
         }
     }
+
+    // Once-per-session diagnostic state. The placement flags are plain bools
+    // so the per-frame success path stays allocation-free.
+    private static readonly HashSet<string> LoggedPassThroughs = new();
+    private static bool loggedLeftPlacement;
+    private static bool loggedRightPlacement;
 
     internal static MethodBase? TargetMethod()
     {
@@ -57,6 +67,9 @@ internal static class CarryOnHudPatch
         if (LeftPositionsField?.GetValue(__instance) is not (int, int)[] left ||
             RightPositionsField?.GetValue(__instance) is not (int, int)[] right)
         {
+            LogPassThrough("anchor-tables-unavailable",
+                $"cached anchor table lookup failed (leftField={LeftPositionsField is not null}, " +
+                $"rightField={RightPositionsField is not null}); leaving CarryOn's defaults.");
             return;
         }
 
@@ -64,14 +77,20 @@ internal static class CarryOnHudPatch
         int rightIndex = leftIndex < 0 ? IndexOf(right, __result) : -1;
         if (leftIndex < 0 && rightIndex < 0)
         {
+            LogPassThrough("no-anchor-match",
+                $"returned position ({__result.X},{__result.Y}) matched no cached anchor; leaving CarryOn's defaults.");
             return;
         }
 
-        if (!HudHotbarPatch.TryGetIndicatorRect(out int cellX, out int _, out int cellSize) ||
-            !HudHotbarPatch.TryGetHotbarRowExtent(out int rowLeft, out int rowRight))
+        bool indicatorRectValid = HudHotbarPatch.TryGetIndicatorRect(out int cellX, out int _, out int cellSize);
+        bool rowExtentValid = HudHotbarPatch.TryGetHotbarRowExtent(out int rowLeft, out int rowRight);
+        if (!indicatorRectValid || !rowExtentValid)
         {
             // Indicator hidden: centering is off and the bar is vanilla, so
             // CarryOn's own hardcoded positions are already correct.
+            LogPassThrough("geometry-unavailable",
+                $"hotbar geometry unavailable (indicatorRect={indicatorRectValid}, rowExtent={rowExtentValid}); " +
+                "leaving CarryOn's defaults.");
             return;
         }
 
@@ -95,6 +114,8 @@ internal static class CarryOnHudPatch
                 index, leftSide, cellX, cellSize, rowLeft, rowRight, iconSize, iconGap, out int centerX,
                 backgroundLeft, backgroundRight))
         {
+            LogPassThrough("solver-rejected",
+                "the anchor solver rejected the placement inputs; leaving CarryOn's defaults.");
             return;
         }
 
@@ -105,7 +126,28 @@ internal static class CarryOnHudPatch
             centerX = Math.Max(iconSize / 2, Math.Min(centerX, frameWidth - (iconSize / 2)));
         }
 
+        if (leftSide ? !loggedLeftPlacement : !loggedRightPlacement)
+        {
+            if (leftSide) loggedLeftPlacement = true; else loggedRightPlacement = true;
+            OpenHandModSystem.ClientApi?.Logger.Notification(
+                "Open Hand repositioned CarryOn's carried-item anchor {0}{1}: ({2},{3}) -> ({4},{3}) " +
+                "[cell={5} row={6}-{7} bg={8}-{9}]",
+                leftSide ? "L" : "R", index + 1, __result.X, __result.Y, centerX,
+                cellX, rowLeft, rowRight,
+                backgroundLeft?.ToString() ?? "n/a", backgroundRight?.ToString() ?? "n/a");
+        }
+
         __result = (centerX, __result.Y);
+    }
+
+    private static void LogPassThrough(string key, string message)
+    {
+        if (!LoggedPassThroughs.Add(key))
+        {
+            return;
+        }
+
+        OpenHandModSystem.ClientApi?.Logger.Notification("Open Hand CarryOn HUD: {0}", message);
     }
 
     private static int IndexOf((int, int)[] table, (int X, int Y) value)
