@@ -85,6 +85,13 @@ internal static class HudHotbarPatch
     private static int rowLeft;
     private static int rowRight;
 
+    // The visible hotbar background edges (the Open Hand extension included),
+    // published alongside the row extent: CarryOn's icon gap is measured
+    // against the background edge, not the outermost cell.
+    private static bool backgroundEdgesValid;
+    private static int backgroundLeftEdge;
+    private static int backgroundRightEdge;
+
     internal static void ApplyConfig(OpenHandClientConfig value, IconAnchorMode mode)
     {
         config = value;
@@ -159,6 +166,13 @@ internal static class HudHotbarPatch
         return rowExtentValid;
     }
 
+    internal static bool TryGetHotbarBackgroundEdges(out int left, out int right)
+    {
+        left = backgroundLeftEdge;
+        right = backgroundRightEdge;
+        return backgroundEdgesValid;
+    }
+
     internal static MethodBase? TargetMethod()
     {
         Type? type = AccessTools.TypeByName("Vintagestory.Client.NoObf.HudHotbar");
@@ -184,6 +198,7 @@ internal static class HudHotbarPatch
         centeringBlockedComposer = null;
         indicatorRectValid = false;
         rowExtentValid = false;
+        backgroundEdgesValid = false;
         ResetIconTexture();
     }
 
@@ -491,6 +506,7 @@ internal static class HudHotbarPatch
         // leaves it invalid so clicks pass through while nothing is drawn.
         indicatorRectValid = false;
         rowExtentValid = false;
+        backgroundEdgesValid = false;
         if (!config.ShowIndicator)
         {
             return;
@@ -571,6 +587,25 @@ internal static class HudHotbarPatch
         }
 
         rowExtentValid = rowLeft < rowRight;
+
+        // The background edges are what other HUDs should measure their gaps
+        // against: the vanilla background wraps the cells with padding, and
+        // the Open Hand extension moves the visible left edge further left.
+        if (__instance is GuiDialog bgDialog &&
+            bgDialog.Composers["hotbar"] is GuiComposer bgComposer &&
+            TryGetHotbarBackgroundBounds(__instance, out ElementBounds bgBounds))
+        {
+            int bgLeftEdge = (int)bgComposer.Bounds.renderX + (int)bgBounds.bgDrawX;
+            int bgRightEdge = bgLeftEdge + (int)bgBounds.OuterWidth;
+            if (ReferenceEquals(bgComposer, extendedComposer) && continuousBackground is not null)
+            {
+                bgLeftEdge = Math.Min(bgLeftEdge, (int)bgComposer.Bounds.renderX - continuousBackground.ExtensionWidth);
+            }
+
+            backgroundEdgesValid = bgLeftEdge < bgRightEdge;
+            backgroundLeftEdge = bgLeftEdge;
+            backgroundRightEdge = bgRightEdge;
+        }
 
         // While selected, layer vanilla's own active slot highlight texture,
         // drawn exactly the way the slot grid draws it (2px overscan, z 50).

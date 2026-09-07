@@ -75,6 +75,14 @@ internal static class CarryOnHudPatch
             return;
         }
 
+        int? backgroundLeft = null;
+        int? backgroundRight = null;
+        if (HudHotbarPatch.TryGetHotbarBackgroundEdges(out int bgLeft, out int bgRight))
+        {
+            backgroundLeft = bgLeft;
+            backgroundRight = bgRight;
+        }
+
         // Decompile evidence (CarryOn 1.14.3 HudCarriedRenderer.
         // UpdateCachedPositions): scaled(32) icon, scaled(16) gap and anchor
         // pitch, centers clamped into the viewport.
@@ -84,7 +92,8 @@ internal static class CarryOnHudPatch
         bool leftSide = leftIndex >= 0;
         int index = leftSide ? leftIndex : rightIndex;
         if (!OpenHandCarryAnchorSolver.TryPlace(
-                index, leftSide, cellX, cellSize, rowLeft, rowRight, iconSize, iconGap, out int centerX))
+                index, leftSide, cellX, cellSize, rowLeft, rowRight, iconSize, iconGap, out int centerX,
+                backgroundLeft, backgroundRight))
         {
             return;
         }
