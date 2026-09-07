@@ -134,14 +134,27 @@ internal sealed class OpenHandClientController : IDisposable
     // own handling of the press intact.
     private void OnKeyDown(KeyEvent args)
     {
-        bool enabled = isDoubleTapEnabled();
-        if (args.Handled || !enabled)
+        if (args.Handled)
         {
             return;
         }
 
         IClientPlayer? player = capi.World?.Player;
         if (player is null || DialogsCaptureInputs())
+        {
+            return;
+        }
+
+        // While carrying, the selection is locked to Open Hand: CarryOn
+        // blocks slot changes anyway, and exiting would strand the carried
+        // block on a slot that cannot place it.
+        if (OpenHandRuntime.IsSelected(player) && CarryOnInterop.IsCarryingHands(player.Entity))
+        {
+            args.Handled = true;
+            return;
+        }
+
+        if (!isDoubleTapEnabled())
         {
             return;
         }
@@ -163,7 +176,7 @@ internal sealed class OpenHandClientController : IDisposable
             OpenHandRuntime.IsSelected(player),
             player.InventoryManager.ActiveHotbarSlotNumber,
             requestedSlot.Value,
-            enabled);
+            isDoubleTapEnabled());
         switch (decision.Action)
         {
             case OpenHandDoubleTap.DoubleTapAction.Enter:
@@ -201,8 +214,13 @@ internal sealed class OpenHandClientController : IDisposable
         if (current.IsSelected)
         {
             // Toggle: pressing the hotkey again returns to the slot held before
-            // entering Open Hand.
-            DeselectToSlot(player, current.RememberedHotbarSlot);
+            // entering Open Hand — blocked while carrying, the same lock as
+            // scrolling and digit keys.
+            if (!CarryOnInterop.IsCarryingHands(player.Entity))
+            {
+                DeselectToSlot(player, current.RememberedHotbarSlot);
+            }
+
             return;
         }
 
@@ -257,7 +275,24 @@ internal sealed class OpenHandClientController : IDisposable
         }
 
         IClientPlayer? player = capi.World?.Player;
-        if (player is null || !WheelWouldReachHotbar())
+        if (player is null)
+        {
+            return;
+        }
+
+        // Selection locked while carrying: scrolling neither exits Open Hand
+        // nor cycles slots (CarryOn blocks those changes while carrying).
+        if (OpenHandRuntime.IsSelected(player) && CarryOnInterop.IsCarryingHands(player.Entity))
+        {
+            if (WheelWouldReachHotbar())
+            {
+                args.SetHandled();
+            }
+
+            return;
+        }
+
+        if (!WheelWouldReachHotbar())
         {
             return;
         }
@@ -343,7 +378,8 @@ internal sealed class OpenHandClientController : IDisposable
     private EnumHandling OnBeforeActiveSlotChanged(ActiveSlotChangeEventArgs change)
     {
         IClientPlayer? player = capi.World?.Player;
-        if (player is not null && OpenHandRuntime.IsSelected(player))
+        if (player is not null && OpenHandRuntime.IsSelected(player) &&
+            !CarryOnInterop.IsCarryingHands(player.Entity))
         {
             RequestSelection(false, change.ToSlot, player);
         }

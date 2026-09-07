@@ -21,6 +21,7 @@ Built and tested against Vintage Story **1.22.7**, and the packaged mod declares
 - With **slot key double-tap** enabled (off by default), pressing the number key of the already-active slot selects Open Hand — and while Open Hand is selected, that same key returns to the slot even though vanilla sees no slot change.
 - Wheel scrolling works normally in dialogs and vanilla backpack mode.
 - Clicking the indicator cell toggles Open Hand, just like the hotkey. If you are holding an item stack on the mouse cursor, the click is swallowed instead — the stack is never dropped by clicking the indicator.
+- While carrying a block with CarryOn, the selection stays locked on Open Hand: scrolling, number keys, and toggling won't kick you out of it. Place the block first — then everything behaves normally.
 
 While Open Hand is selected the engine resolves the main hand as empty. The ten physical hotbar slots and the offhand are never touched.
 

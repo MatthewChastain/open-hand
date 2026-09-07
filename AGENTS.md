@@ -152,6 +152,14 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   anchors, which are hardcoded to a vanilla-centered 850px bar and otherwise
   collide with the indicator cell. A CarryOn update that renames its HUD
   internals disables only that correction (logged), never the rest of the mod.
+- While carrying, Open Hand locks the selection to itself: scrolling is
+  swallowed before vanilla slot cycling, digit keys are consumed, slot-change
+  attempts do not deselect, and toggling off is blocked until the block is
+  placed. CarryOn blocks those slot changes anyway, and exiting mid-carry
+  strands the player on a slot that cannot place the block. Carry state is
+  reflection-read from CarryOn's `GetCarried` extension
+  (`OpenHand.Client.CarryOnInterop`); a missing or renamed API simply reports
+  not-carrying, never breaks Open Hand's own input handling.
 - CarryOn's placement transaction leaves two artifacts in the substituted
   slot, both reclaimed by `OpenHandRuntime.SweepSubstitutedSlot()` every game
   tick (client and server): the placed block's stack stays in the active hand
