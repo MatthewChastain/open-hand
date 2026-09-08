@@ -7,7 +7,8 @@ using Vintagestory.API.Client;
 namespace OpenHand.Patches;
 
 // Built-in compatibility with CarryOn's carried-item HUD (decompiled CarryOn
-// 1.14.3, CarryOn.Client.HudCarried+HudCarriedRenderer). CarryOn hardcodes its
+// 1.14.3: HudCarried+HudCarriedRenderer; decompiled CarryOn 2.0.0-pre.8:
+// top-level CarryOn.Client.Logic.HudCarriedRenderer). CarryOn hardcodes its
 // anchor geometry to an assumed vanilla hotbar (screen-centered, 850 unscaled
 // pixels wide, 36 above the bottom), so the default hands anchor L1 lands
 // exactly where Open Hand draws its indicator cell, and no anchor follows
@@ -33,6 +34,17 @@ internal static class CarryOnHudPatch
     {
         get
         {
+            // CarryOn 2.0.0 moved the renderer out of HudCarried into a
+            // top-level internal class (CarryOn.Client.Logic.HudCarriedRenderer,
+            // decompiled 2.0.0-pre.8); 1.14.x nests it inside
+            // CarryOn.Client.HudCarried. Try both so one build supports the
+            // whole line; all other member names match in either layout.
+            Type? topLevel = AccessTools.TypeByName("CarryOn.Client.Logic.HudCarriedRenderer");
+            if (topLevel is not null)
+            {
+                return topLevel;
+            }
+
             Type? outer = AccessTools.TypeByName("CarryOn.Client.HudCarried");
             return outer?.GetNestedType("HudCarriedRenderer", BindingFlags.NonPublic | BindingFlags.Public);
         }
@@ -46,8 +58,9 @@ internal static class CarryOnHudPatch
 
     internal static MethodBase? TargetMethod()
     {
-        MethodBase? method = AccessTools.Method(RendererType, "GetPositionForAnchor");
-        if (method is null && LeftPositionsField is not null)
+        Type? rendererType = RendererType;
+        MethodBase? method = AccessTools.Method(rendererType, "GetPositionForAnchor");
+        if (method is null && rendererType is not null)
         {
             // CarryOn is loaded but its renderer shape changed; say so once per
             // game start rather than failing silently in a confusing way.
@@ -102,9 +115,9 @@ internal static class CarryOnHudPatch
             backgroundRight = bgRight;
         }
 
-        // Decompile evidence (CarryOn 1.14.3 HudCarriedRenderer.
-        // UpdateCachedPositions): scaled(32) icon, scaled(16) gap and anchor
-        // pitch, centers clamped into the viewport.
+        // Decompile evidence (CarryOn 1.14.3 and 2.0.0-pre.8
+        // HudCarriedRenderer.UpdateCachedPositions): scaled(32) icon,
+        // scaled(16) gap and anchor pitch, centers clamped into the viewport.
         int iconSize = (int)Math.Round(GuiElement.scaled(32.0));
         int iconGap = (int)Math.Round(GuiElement.scaled(16.0));
 
