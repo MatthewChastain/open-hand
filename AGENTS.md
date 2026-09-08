@@ -202,10 +202,12 @@ rejects other formats ("The NetworkVersion of this mod ... is malformed").
   build locally with `scripts/package.py`, and attach the zip to the GitHub release.
   The Release workflow only validates the tag/version match — creating the GitHub
   release and attaching the zip is done manually with `gh release create`.
-- The Mod DB page (description, changelog) is maintained by hand in a browser as
-  HTML — agents cannot log in there. Supply paste-ready HTML copy (description
-  sections use `<h3>`/`<ul>`/`<li>` with `<code>` for commands) and remind the
-  owner to upload the new zip and switch the page's download to it.
+- The Mod DB page (description, changelog) at https://mods.vintagestory.at/openhand
+  is maintained by hand in a browser as HTML — agents cannot log in there. Supply
+  paste-ready HTML copy (description sections use `<h3>`/`<ul>`/`<li>` with
+  `<code>` for commands) and remind the owner to upload the new zip and switch
+  the page's download to it. Comments on the page are publicly viewable and can
+  be read by fetching the page.
 
 ## Local test instance
 
