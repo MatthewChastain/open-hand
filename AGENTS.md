@@ -94,12 +94,16 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   against decompiled assemblies of the mod's shipping version (include the
   evidence in the PR; re-verify on mod updates). Document every target here.
   Current target: `CarryOnHudPatch` postfixes CarryOn's private
-  `HudCarried+HudCarriedRenderer.GetPositionForAnchor` so carried-item icons
-  clear the indicator cell and follow the real hotbar (CarryOn hardcodes a
-  vanilla-centered 850px bar). Verified against decompiled CarryOn 1.14.3;
-  re-verify on CarryOn updates. Every guarded path and the first successful
-  repositioning per side log once per session, so a "the icons didn't move"
-  report is diagnosable from `client-main.log` without a debugger.
+  `GetPositionForAnchor` so carried-item icons clear the indicator cell and
+  follow the real hotbar (CarryOn hardcodes a vanilla-centered 850px bar).
+  Verified against decompiled CarryOn 1.14.3
+  (`CarryOn.Client.HudCarried+HudCarriedRenderer.GetPositionForAnchor`) and
+  2.0.0-pre.8 (top-level `CarryOn.Client.Logic.HudCarriedRenderer`, same
+  method/field names, same scaled(32)/scaled(16) geometry and hardcoded 850px
+  bar in `UpdateCachedPositions`); re-verify on CarryOn updates. Every guarded
+  path and the first successful repositioning per side log once per session,
+  so a "the icons didn't move" report is diagnosable from `client-main.log`
+  without a debugger.
 - **Patch targets are verified against decompiled 1.22.7 assemblies.** Changes to
   patch targets or game-version assumptions must include decompile evidence in the PR.
 - **Same-value slot assignment is a no-op in vanilla.** Setting
@@ -155,6 +159,11 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   anchors, which are hardcoded to a vanilla-centered 850px bar and otherwise
   collide with the indicator cell. A CarryOn update that renames its HUD
   internals disables only that correction (logged), never the rest of the mod.
+  CarryOn 2.x reorganized its internals (renderer moved to the top-level
+  `CarryOn.Client.Logic.HudCarriedRenderer`; carry state moved from a static
+  extension to the `ICarryManager` instance on the new CarryOnLib library
+  mod); Open Hand supports both the 1.14.x and 2.x layouts, preferring 2.x
+  when present.
 - While carrying, Open Hand locks the selection to itself: scrolling is
   swallowed before vanilla slot cycling, digit keys pass through untouched
   (never set `Handled` in the KeyDown listener — it receives every key and
@@ -162,9 +171,13 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   exit, slot-change attempts do not deselect, and toggling off is blocked
   until the block is placed. CarryOn cancels those slot changes anyway, and
   exiting mid-carry strands the player on a slot that cannot place the block.
-  Carry state is reflection-read from CarryOn's `GetCarried` extension
-  (`OpenHand.Client.CarryOnInterop`); a missing or renamed API simply reports
-  not-carrying, never breaks Open Hand's own input handling.
+  Carry state is reflection-read in `OpenHand.Client.CarryOnInterop`, which
+  supports both shipping CarryOn layouts: 2.0.0 (instance
+  `ICarryManager.GetCarried(Entity, CarrySlot)` reached through the
+  `CarryOnLibSystem` ModSystem of the separate CarryOnLib library mod —
+  CarryOn 2.0.0 requires it) and 1.14.x (static `GetCarried` extension on
+  `CarryOn.API.Common.CarryableExtensions`). A missing or renamed API simply
+  reports not-carrying, never breaks Open Hand's own input handling.
 - CarryOn's placement transaction leaves two artifacts in the substituted
   slot, both reclaimed by `OpenHandRuntime.SweepSubstitutedSlot()` every game
   tick (client and server): the placed block's stack stays in the active hand
@@ -202,10 +215,12 @@ rejects other formats ("The NetworkVersion of this mod ... is malformed").
   build locally with `scripts/package.py`, and attach the zip to the GitHub release.
   The Release workflow only validates the tag/version match — creating the GitHub
   release and attaching the zip is done manually with `gh release create`.
-- The Mod DB page (description, changelog) is maintained by hand in a browser as
-  HTML — agents cannot log in there. Supply paste-ready HTML copy (description
-  sections use `<h3>`/`<ul>`/`<li>` with `<code>` for commands) and remind the
-  owner to upload the new zip and switch the page's download to it.
+- The Mod DB page (description, changelog) at https://mods.vintagestory.at/openhand
+  is maintained by hand in a browser as HTML — agents cannot log in there. Supply
+  paste-ready HTML copy (description sections use `<h3>`/`<ul>`/`<li>` with
+  `<code>` for commands) and remind the owner to upload the new zip and switch
+  the page's download to it. Comments on the page are publicly viewable and can
+  be read by fetching the page.
 
 ## Local test instance
 
