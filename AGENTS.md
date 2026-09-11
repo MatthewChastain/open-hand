@@ -227,6 +227,26 @@ rejects other formats ("The NetworkVersion of this mod ... is malformed").
   the page's download to it. Comments on the page are publicly viewable and can
   be read by fetching the page.
 
+## Changelog formats
+
+Release notes are produced at release time in two places (see Branching &
+releases), both summarizing only that release's changes.
+
+- **GitHub release notes** — attached to the `v<version>` tag by
+  `gh release create`. Title `Open Hand <version>`; a one-sentence summary
+  naming the release type and what it was validated against (game build,
+  CarryOn versions where relevant); then `##` sections grouped by theme
+  (`## CarryOn compatibility`, `## Fixes`, `## UX`), most significant first;
+  a closing `## Notes` section with support requirements (Vintage Story
+  1.22.x on client and server) and the `/openhand status` diagnostics
+  pointer. Bullets may name the version a change shipped in when a section
+  covers several releases.
+- **Mod DB changelog** — paste-ready HTML for the page's changelog section
+  (the page is hand-maintained; see Branching & releases). One
+  `<h3><version> — <short title></h3>` heading per release, newest first,
+  followed by a `<ul>` of `<li>` items describing that release's
+  user-visible changes, with commands and paths in `<code>`.
+
 ## Local test instance
 
 A private Vintage Story test instance lives outside this repo at `~/code/vs-testing/`
