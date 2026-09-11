@@ -1,11 +1,15 @@
 namespace OpenHand.Common;
 
 /// <summary>
-/// Pure decision logic for re-tap hotbar key entry (off by default). Pressing
-/// the number key of the already-active slot normally does nothing because
-/// same-value slot assignment raises no events, so Open Hand treats that
-/// gesture as a request for an empty hand. While Open Hand is selected, the
-/// same press returns to the slot, since vanilla cannot see a change either.
+/// Pure decision logic for the hotbar number keys around the empty hand.
+/// Pressing the number key of the already-active slot normally does nothing
+/// because same-value slot assignment raises no events, so Open Hand treats
+/// that gesture as a request for an empty hand — opt-in via the double-tap
+/// preference. While Open Hand is selected, the same press always returns to
+/// the slot regardless of that preference: the physical slot number never
+/// moved, so vanilla applies a same-value no-op and fires no events
+/// (decompiled 1.22.7 ClientPlayerInventoryManager.ActiveHotbarSlotNumber
+/// setter) — exiting is Open Hand's own responsibility there.
 /// </summary>
 public static class OpenHandDoubleTap
 {
@@ -29,7 +33,7 @@ public static class OpenHandDoubleTap
     /// <param name="enabled">Whether the client double-tap preference is on.</param>
     public static DoubleTapDecision Resolve(bool isSelected, int activeSlot, int requestedSlot, bool enabled)
     {
-        if (!enabled || requestedSlot is < 0 or >= OpenHandSelectionState.PhysicalHotbarSlots)
+        if (requestedSlot is < 0 or >= OpenHandSelectionState.PhysicalHotbarSlots)
         {
             return new(DoubleTapAction.None, activeSlot);
         }
@@ -41,8 +45,17 @@ public static class OpenHandDoubleTap
             return new(DoubleTapAction.None, requestedSlot);
         }
 
-        return isSelected
-            ? new(DoubleTapAction.ExitToSlot, requestedSlot)
-            : new(DoubleTapAction.Enter, requestedSlot);
+        // While selected, the same press must return to the slot: vanilla
+        // sees a same-value assignment and raises no events, so no other
+        // path can act on it. That half is unconditional; the entry gesture
+        // is the only part behind the double-tap preference.
+        if (isSelected)
+        {
+            return new(DoubleTapAction.ExitToSlot, requestedSlot);
+        }
+
+        return enabled
+            ? new(DoubleTapAction.Enter, requestedSlot)
+            : new(DoubleTapAction.None, activeSlot);
     }
 }
