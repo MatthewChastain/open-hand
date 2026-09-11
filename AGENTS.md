@@ -134,8 +134,13 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   captures input), and yield when a hovered slot would turn the press into an
   inventory swap. Resolve presses against the live `hotbarslot` bindings
   (`capi.Input.HotKeys`) so user rebinds are honored. While Open Hand is
-  selected, `ActiveHotbarSlotNumber` still reports the remembered physical slot.
-  See `OpenHandDoubleTap` + `OpenHandClientController.OnKeyDown` for the pattern.
+  selected, `ActiveHotbarSlotNumber` still reports the remembered physical slot
+  — so pressing that slot's digit is a vanilla same-value no-op (the
+  `ClientPlayerInventoryManager.ActiveHotbarSlotNumber` setter returns before
+  firing any events, decompiled 1.22.7), and the listener must perform the
+  exit itself; the double-tap preference gates only the entry gesture, never
+  the exit. See `OpenHandDoubleTap` + `OpenHandClientController.OnKeyDown`
+  for the pattern.
 - **Indicator click interception rides `capi.Event.MouseDown`, not the GUI.**
   `api.eventapi.TriggerMouseDown` fires before any client system or dialog
   sees the click (verified against 1.22.7 `ClientMain.UpdateMouseButtonState`),
@@ -167,7 +172,7 @@ These are load-bearing design decisions. Do not weaken them without discussion.
 - While carrying, Open Hand locks the selection to itself: scrolling is
   swallowed before vanilla slot cycling, digit keys pass through untouched
   (never set `Handled` in the KeyDown listener — it receives every key and
-  swallowing strands movement and escape), the same-slot double-tap does not
+  swallowing strands movement and escape), the same-slot digit press does not
   exit, slot-change attempts do not deselect, and toggling off is blocked
   until the block is placed. CarryOn cancels those slot changes anyway, and
   exiting mid-carry strands the player on a slot that cannot place the block.

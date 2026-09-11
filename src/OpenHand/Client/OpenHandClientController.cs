@@ -145,13 +145,9 @@ internal sealed class OpenHandClientController : IDisposable
             return;
         }
 
-        if (!isDoubleTapEnabled())
-        {
-            return;
-        }
-
         // With a slot hovered (inventory open), vanilla turns a number press
-        // into a swap with that slot; never select Open Hand on top of it.
+        // into a swap with that slot; never select Open Hand on top of it,
+        // and never exit on top of a swap either.
         if (player.InventoryManager.CurrentHoveredSlot is not null)
         {
             return;
@@ -163,6 +159,9 @@ internal sealed class OpenHandClientController : IDisposable
             return;
         }
 
+        // Resolved even when the double-tap preference is off: while Open
+        // Hand is selected, pressing the remembered slot's digit is a vanilla
+        // same-value no-op, so exiting is this listener's job alone.
         OpenHandDoubleTap.DoubleTapDecision decision = OpenHandDoubleTap.Resolve(
             OpenHandRuntime.IsSelected(player),
             player.InventoryManager.ActiveHotbarSlotNumber,

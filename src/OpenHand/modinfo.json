@@ -4,7 +4,7 @@
   "name": "Open Hand",
   "description": "An always-empty hand option for the discerning adventurer.",
   "authors": ["TheAzyrian"],
-"version": "1.0.5",
+"version": "1.0.6",
   "networkVersion": "1.22.0",
   "side": "universal",
   "requiredOnClient": true,
