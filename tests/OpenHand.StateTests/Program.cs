@@ -148,13 +148,17 @@ DoubleTap(OpenHandDoubleTap.DoubleTapAction.None, 4,
     isSelected: false, activeSlot: 4, requestedSlot: -1,
     name: "negative slot never double-taps");
 
-// Double-tap: disabled restores vanilla behavior entirely.
+// Double-tap: disabled restores the vanilla entry behavior. The exit half
+// is not a preference: while selected, the physical slot number never moved,
+// so the remembered slot's key press is a vanilla same-value no-op
+// (ClientPlayerInventoryManager setter raises no events) and only Open Hand
+// can act on it.
 DoubleTap(OpenHandDoubleTap.DoubleTapAction.None, 4,
     isSelected: false, activeSlot: 4, requestedSlot: 4, enabled: false,
     name: "disabled passes re-tap through");
-DoubleTap(OpenHandDoubleTap.DoubleTapAction.None, 4,
+DoubleTap(OpenHandDoubleTap.DoubleTapAction.ExitToSlot, 4,
     isSelected: true, activeSlot: 4, requestedSlot: 4, enabled: false,
-    name: "disabled passes exit through");
+    name: "remembered slot key exits even when double-tap entry is disabled");
 
 Equal(false, new OpenHandClientConfig().DoubleTapHotbarKey, "double tap defaults off");
 Equal(true, new OpenHandClientConfig().CenterHotbar, "centering defaults on");

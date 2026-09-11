@@ -40,6 +40,10 @@ public sealed class OpenHandClientConfig
     /// Re-tap entry: pressing the number key of the already-active hotbar
     /// slot selects Open Hand instead of doing nothing. Off by default; the
     /// selection itself still runs through the server-validated path.
+    /// Exiting is not part of this preference: while Open Hand is selected,
+    /// pressing the remembered slot's number key always returns to it,
+    /// because vanilla applies a same-value no-op that Open Hand must
+    /// handle itself.
     /// </summary>
     public bool DoubleTapHotbarKey { get; set; }
 
