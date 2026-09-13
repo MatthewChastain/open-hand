@@ -66,12 +66,17 @@ internal static class ClientHotkeyTests
             ? channel : throw new InvalidOperationException($"Unexpected network API call: {method.Name}");
         int subscriptions = 0;
         int tickListeners = 0;
+        Action<float>? gameTick = null;
         IClientEventAPI events = DispatchProxy.Create<IClientEventAPI, RecordingProxy>();
-        ((RecordingProxy)events).Handler = (method, _) =>
+        ((RecordingProxy)events).Handler = (method, args) =>
         {
             if (method.Name.StartsWith("add_", StringComparison.Ordinal)) subscriptions++;
             else if (method.Name.StartsWith("remove_", StringComparison.Ordinal)) subscriptions--;
-            else if (method.Name == "RegisterGameTickListener") tickListeners++; // the substituted-slot sweep
+            else if (method.Name == "RegisterGameTickListener")
+            {
+                tickListeners++; // the substituted-slot sweep
+                gameTick = (Action<float>)args[0]!;
+            }
             else if (method.Name == "UnregisterGameTickListener") tickListeners--;
             else throw new InvalidOperationException($"Unexpected event call: {method.Name}");
             return (long)tickListeners; // the tick registration's long; ignored elsewhere
@@ -79,8 +84,12 @@ internal static class ClientHotkeyTests
         ICoreClientAPI api = DispatchProxy.Create<ICoreClientAPI, RecordingProxy>();
         IClientPlayer player = TestFakes.MakeClientPlayer("uid-client-hotkey", api, new TestFakes.TestInventory(12));
         TestFakes.SeedControls(player.Entity);
+        // The local player comes into existence only after the world finishes
+        // loading; the world proxy models that so tests can deliver join-time
+        // updates while it is still null.
+        IClientPlayer? localPlayer = player;
         IClientWorldAccessor world = TestFakes.Proxy<IClientWorldAccessor>((method, _) =>
-            method.Name == "get_Player" ? player : TestFakes.Default(method));
+            method.Name == "get_Player" ? localPlayer : TestFakes.Default(method));
         ILogger logger = TestFakes.MakeRecordingLogger(out List<string> log);
         ((RecordingProxy)api).Handler = (method, _) => method.Name switch
         {
@@ -160,6 +169,43 @@ internal static class ClientHotkeyTests
         TestFakes.Require(sent.Count == 3 &&
             sent[2] is OpenHandOffhandRequest { IsEmpty: false, Revision: 6 },
             "a restored offhand state is dropped when the feature switch is off");
+
+        // The server's join replay arrives while the world is still loading —
+        // before the local player exists (decompiled: PlayerJoin fires between
+        // LevelInitialize and LevelFinalize). It must be buffered and applied
+        // on the first tick after the player exists, never dropped: a dropped
+        // replay left a restored selection invisible and the next toggle
+        // bounced off the server's restored revision as stale.
+        offhandEnabled = true;
+        localPlayer = null;
+        messageHandlers[nameof(OpenHandSelectionUpdate)].DynamicInvoke(
+            new OpenHandSelectionUpdate { PlayerUid = "uid-client-hotkey", Selected = true, RememberedHotbarSlot = 5, Revision = 3 });
+        messageHandlers[nameof(OpenHandOffhandUpdate)].DynamicInvoke(
+            new OpenHandOffhandUpdate { PlayerUid = "uid-client-hotkey", IsEmpty = true, Revision = 7 });
+        TestFakes.Require(OpenHandRuntime.IsSelected(player) &&
+            OpenHandRuntime.Get(player).Revision == 1 &&
+            !OpenHandRuntime.IsOffhandEmpty(player) &&
+            OpenHandRuntime.GetOffhandState(player).Revision == 6 && sent.Count == 3,
+            "join-time updates arriving before the player exists change nothing yet");
+        localPlayer = player;
+        gameTick!.Invoke(0.5f);
+        TestFakes.Require(OpenHandRuntime.IsSelected(player) &&
+            OpenHandRuntime.Get(player).RememberedHotbarSlot == 5 &&
+            OpenHandRuntime.Get(player).Revision == 3,
+            "a buffered selection replay is applied once the player exists");
+        TestFakes.Require(OpenHandRuntime.IsOffhandEmpty(player) &&
+            OpenHandRuntime.GetOffhandState(player).Revision == 7,
+            "a buffered offhand replay is applied once the player exists");
+        TestFakes.Require(sent.Count == 5 &&
+            sent[3] is OpenHandSelectionRequest { Revision: 0 } &&
+            sent[4] is OpenHandOffhandRequest { Revision: 0 },
+            "the ready refresh asks the server for the current state with revision 0");
+
+        // With the restored revisions learned (3 / 7), the next toggles must
+        // not be stale: the counters were bumped by the replay.
+        TestFakes.Require(offhand.Handler(offhand.CurrentMapping) &&
+            sent[5] is OpenHandOffhandRequest { IsEmpty: false, Revision: 8 },
+            "a toggle after the replay is not stale");
 
         controller.Dispose();
         indicator.Handler(indicator.CurrentMapping);

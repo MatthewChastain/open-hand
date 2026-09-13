@@ -181,6 +181,17 @@ optimistic state drives the visuals; diagnosable only from the
 line). `OpenHandRuntime` keys state by (API side, player UID), and the server
 join handler re-seeds the server partition from the persisted truth. Keep the
 client's optimistic writes on the client side of that partition.
+- **The server's join replay arrives before the client's local player exists.**
+Decompiled 1.22.7: `HandleRequestJoin` fires `PlayerJoin` between
+`LevelInitialize` and `LevelFinalize`, so replay packets hit the client while
+the world is still loading and `capi.World.Player` is still null — a client
+handler that ignores updates while the player is null silently DROPS the
+restored state (the restored selection stayed invisible and the next toggle
+bounced off the server's restored revision as stale). The client buffers such
+updates and applies them on the first tick after the player exists, and sends
+one revision-0 refresh pair at ready — the server's stale-revision branch
+answers those with the authoritative state, healing any other missed
+broadcast. See `OpenHandClientController.ApplyJoinReplay`.
 - **Centering is reversible and on by default.** It adds owned layout offsets, not
   render-only shifts. Gear hover and item-name bounds counter-offset the root.
   A guarded transpiler on the existing `HudHotbar.OnRenderGUI` target prepares

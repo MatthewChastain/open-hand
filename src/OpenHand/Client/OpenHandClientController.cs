@@ -31,6 +31,18 @@ internal sealed class OpenHandClientController : IDisposable
     private int nextOffhandRevision;
     private bool disposed;
 
+    // The server's join replay (and its snapshot of other players) is sent
+    // mid-join — decompiled 1.22.7: HandleRequestJoin fires PlayerJoin between
+    // LevelInitialize and LevelFinalize — so those packets arrive while the
+    // client world is still loading and World.Player is still null. Dropping
+    // them there made a restored selection invisible until the next toggle
+    // (whose request then bounced off the server's restored revision as
+    // stale). Buffer them and apply on the first tick after the player
+    // exists.
+    private readonly List<OpenHandSelectionUpdate> pendingSelectionUpdates = [];
+    private readonly List<OpenHandOffhandUpdate> pendingOffhandUpdates = [];
+    private bool refreshSent;
+
     public OpenHandClientController(
         ICoreClientAPI capi,
         Action openSettings,
@@ -152,6 +164,50 @@ internal sealed class OpenHandClientController : IDisposable
         OpenHandRuntime.SweepSubstitutedSlot();
         OpenHandRuntime.SweepOffhandSlot();
         SuppressOffhandHeldPose();
+        ApplyJoinReplay();
+        RequestInitialStateRefresh();
+    }
+
+    // Applies the join-time updates buffered above, in arrival order, once
+    // the local player exists.
+    private void ApplyJoinReplay()
+    {
+        IClientPlayer? localPlayer = capi.World?.Player;
+        if (localPlayer is null ||
+            (pendingSelectionUpdates.Count == 0 && pendingOffhandUpdates.Count == 0))
+        {
+            return;
+        }
+
+        LogOnce("replay:buffered",
+            $"Open Hand: applying {pendingSelectionUpdates.Count + pendingOffhandUpdates.Count} state update(s) buffered during the world load.");
+        foreach (OpenHandSelectionUpdate update in pendingSelectionUpdates)
+        {
+            ApplySelectionUpdate(localPlayer, update);
+        }
+        foreach (OpenHandOffhandUpdate update in pendingOffhandUpdates)
+        {
+            ApplyOffhandUpdate(localPlayer, update);
+        }
+        pendingSelectionUpdates.Clear();
+        pendingOffhandUpdates.Clear();
+    }
+
+    // Self-heal: ask the server for the current state once the player exists
+    // by sending revision-0 requests — the server's stale-revision branch
+    // answers them with the authoritative state. Repairs any join-time
+    // broadcast that was missed for any other reason.
+    private void RequestInitialStateRefresh()
+    {
+        if (refreshSent || capi.World?.Player is null)
+        {
+            return;
+        }
+
+        refreshSent = true;
+        LogOnce("net:refresh", "Open Hand: requesting the current selection and offhand state from the server.");
+        SendRequest("selection refresh", new OpenHandSelectionRequest { Revision = 0 });
+        SendRequest("empty-offhand refresh", new OpenHandOffhandRequest { Revision = 0 });
     }
 
     // While the offhand reads as empty, a raised shield would keep its pose:
@@ -528,11 +584,24 @@ internal sealed class OpenHandClientController : IDisposable
     private void OnSelectionUpdate(OpenHandSelectionUpdate update)
     {
         IClientPlayer? localPlayer = capi.World?.Player;
-        if (localPlayer is not null && update.PlayerUid == localPlayer.PlayerUID)
+        if (localPlayer is null)
         {
-            nextRevision = Math.Max(nextRevision, update.Revision);
-            OpenHandRuntime.Set(localPlayer, update.Selected, update.RememberedHotbarSlot, update.Revision);
+            pendingSelectionUpdates.Add(update);
+            return;
         }
+
+        ApplySelectionUpdate(localPlayer, update);
+    }
+
+    private void ApplySelectionUpdate(IClientPlayer localPlayer, OpenHandSelectionUpdate update)
+    {
+        if (update.PlayerUid != localPlayer.PlayerUID)
+        {
+            return;
+        }
+
+        nextRevision = Math.Max(nextRevision, update.Revision);
+        OpenHandRuntime.Set(localPlayer, update.Selected, update.RememberedHotbarSlot, update.Revision);
     }
 
     // The empty-offhand toggle: requests the substitution through the
@@ -605,18 +674,31 @@ internal sealed class OpenHandClientController : IDisposable
     private void OnOffhandUpdate(OpenHandOffhandUpdate update)
     {
         IClientPlayer? localPlayer = capi.World?.Player;
-        if (localPlayer is not null && update.PlayerUid == localPlayer.PlayerUID)
+        if (localPlayer is null)
         {
-            nextOffhandRevision = Math.Max(nextOffhandRevision, update.Revision);
-            OpenHandRuntime.SetOffhandEmpty(localPlayer, update.IsEmpty, update.Revision);
+            pendingOffhandUpdates.Add(update);
+            return;
+        }
 
-            // A persisted substitution restored at join must not outlive the
-            // feature switch: if the switch is off, drop the restored state
-            // at once — the request re-persists the cleared state server-side.
-            if (update.IsEmpty && !isEmptyOffhandEnabled())
-            {
-                RequestOffhandEmpty(localPlayer, empty: false);
-            }
+        ApplyOffhandUpdate(localPlayer, update);
+    }
+
+    private void ApplyOffhandUpdate(IClientPlayer localPlayer, OpenHandOffhandUpdate update)
+    {
+        if (update.PlayerUid != localPlayer.PlayerUID)
+        {
+            return;
+        }
+
+        nextOffhandRevision = Math.Max(nextOffhandRevision, update.Revision);
+        OpenHandRuntime.SetOffhandEmpty(localPlayer, update.IsEmpty, update.Revision);
+
+        // A persisted substitution restored at join must not outlive the
+        // feature switch: if the switch is off, drop the restored state
+        // at once — the request re-persists the cleared state server-side.
+        if (update.IsEmpty && !isEmptyOffhandEnabled())
+        {
+            RequestOffhandEmpty(localPlayer, empty: false);
         }
     }
 
@@ -625,6 +707,9 @@ internal sealed class OpenHandClientController : IDisposable
         OpenHandRuntime.ClearAll();
         nextRevision = 0;
         nextOffhandRevision = 0;
+        refreshSent = false;
+        pendingSelectionUpdates.Clear();
+        pendingOffhandUpdates.Clear();
         loggedNotes.Clear();
     }
 
