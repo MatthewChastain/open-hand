@@ -1,5 +1,6 @@
 using OpenHand.Common;
 using Vintagestory.API.Client;
+using Vintagestory.API.Common;
 
 namespace OpenHand.Client;
 
@@ -22,11 +23,48 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
         "Right of hotbar row"
     ];
 
+    // The rebindable Open Hand hotkeys, shown with capture-and-press rebind
+    // buttons. Capture writes event-scale keycodes into the hotkey's
+    // CurrentMapping — the same field vanilla's own controls screen writes —
+    // and OpenHandHotkeyBinding persists the mapping through vanilla's own
+    // ClientSettings path and keeps mouse bindings reachable by the
+    // dispatcher, so matching, persistence, and triggering all follow the
+    // game's normal path.
+    private static readonly string[] BindableHotkeyCodes =
+    [
+        "openhand.select",
+        "openhand.offhand",
+        "openhand.indicator"
+    ];
+
+    private static readonly string[] BindableHotkeyNames =
+    [
+        "Select Open Hand",
+        "Toggle empty offhand",
+        "Open settings"
+    ];
+
     private readonly Func<OpenHandClientConfig> config;
 
     // Receives a config mutator: apply it to the live config, push to the
     // runtime, and persist. Same pipeline as the chat commands.
     private readonly Action<Action<OpenHandClientConfig>> applyAndSave;
+
+    // While capturing, the dialog reports capturing inputs, so the client
+    // controller's KeyDown/MouseDown listeners yield (their guard checks
+    // CaptureAllInputs) and setting Handled in the capture handler keeps the
+    // captured key from also firing the very hotkey being rebound.
+    //
+    // Keys arrive through capi.Event.KeyDown, which fires before hotkey
+    // dispatch. Mouse buttons arrive through the dialog's own OnMouseDown:
+    // CaptureRawMouse makes ClientMain.OnMouseDownRaw route EVERY raw click
+    // straight to the dialogs (GuiManager) and skip the hotkey manager — the
+    // same mechanism vanilla's escape-menu settings use, and the only way to
+    // see buttons 4-8, whose clicks never reach capi.Event.MouseDown because
+    // no vanilla hotkey routes them into UpdateMouseButtonState. The click
+    // that starts a capture is dispatched before capturing begins, so the
+    // first press the override sees is the one the user means to bind.
+    private string? capturingHotKeyCode;
 
     public OpenHandSettingsDialog(
         ICoreClientAPI capi,
@@ -43,6 +81,54 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
     // toggle code, so the same binding works before the world HUD exists.
     public override string ToggleKeyCombinationCode => null!;
 
+    public override bool CaptureAllInputs() => capturingHotKeyCode is not null;
+
+    // While capturing, every raw mouse click is routed to the dialogs instead
+    // of the hotkey manager (verified against 1.22.7 ClientMain
+    // .OnMouseDownRaw and GuiManager.CaptureRawMouse) — exactly what vanilla's
+    // own settings screen does so a capture sees all eight buttons.
+    public override bool CaptureRawMouse() => capturingHotKeyCode is not null;
+
+    public override void OnMouseDown(MouseEvent args)
+    {
+        if (capturingHotKeyCode is null)
+        {
+            base.OnMouseDown(args);
+            return;
+        }
+
+        // Swallow every click during capture so nothing reaches the world or
+        // other dialogs; bind only real buttons (wheel and None are not
+        // buttons). Vanilla mouse hotkeys ignore modifiers
+        // (HotKey.MouseControlsIgnoreModifiers), so store none.
+        args.Handled = true;
+        if (args.Button is EnumMouseButton.None or EnumMouseButton.Wheel ||
+            !OpenHandHotkeyBinding.IsMouseButton(KeyCombination.MouseStart + (int)args.Button))
+        {
+            return;
+        }
+
+        FinishCapture(
+            applied: true,
+            KeyCombination.MouseStart + (int)args.Button,
+            ctrl: false,
+            alt: false,
+            shift: false);
+    }
+
+    public override void OnMouseUp(MouseEvent args)
+    {
+        if (capturingHotKeyCode is not null)
+        {
+            // The release belonging to a captured press must not leak into
+            // other dialogs or the world either.
+            args.Handled = true;
+            return;
+        }
+
+        base.OnMouseUp(args);
+    }
+
     // Layout: 480px wide with generous vertical spacing and clear sectioning:
     // - Behavior switches (pitch 36px, right-aligned)
     // - Indicator position (280px dropdown prevents text truncation)
@@ -51,7 +137,7 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
     // - Footer buttons safely below the wrapped help text
     private void ComposeDialog()
     {
-        ElementBounds inner = ElementBounds.Fixed(EnumDialogArea.CenterMiddle, 0, 0, 480, 424);
+        ElementBounds inner = ElementBounds.Fixed(EnumDialogArea.CenterMiddle, 0, 0, 480, 656);
         ElementBounds outer = inner.FlatCopy().FixedGrow(0, 34);
         CairoFont label = CairoFont.WhiteDetailText();
         CairoFont small = CairoFont.WhiteSmallText();
@@ -60,46 +146,154 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
             .AddShadedDialogBG(ElementBounds.Fill, withTitleBar: false)
             .AddDialogTitleBar("Open Hand Settings", () => TryClose())
             .BeginChildElements(inner)
-                .AddStaticText("Visual indicator", label, ElementBounds.Fixed(18, 28, 380, 22), "showIndicatorLabel")
+                .AddStaticText("Main hand indicator", label, ElementBounds.Fixed(18, 28, 380, 22), "showIndicatorLabel")
                 .AddSwitch(OnShowIndicatorToggled, ElementBounds.Fixed(434, 25, 28, 28), "showIndicator")
-                .AddStaticText("Center hotbar", label, ElementBounds.Fixed(18, 64, 380, 22), "centerLabel")
-                .AddSwitch(OnCenterToggled, ElementBounds.Fixed(434, 61, 28, 28), "centerHotbar")
-                .AddStaticText("Slot key double-tap", label, ElementBounds.Fixed(18, 100, 380, 22), "doubleTapLabel")
-                .AddSwitch(OnDoubleTapToggled, ElementBounds.Fixed(434, 97, 28, 28), "doubleTap")
-                .AddStaticText("Indicator position", label, ElementBounds.Fixed(18, 144, 160, 22), "anchorLabel")
+                .AddStaticText("Offhand indicator", label, ElementBounds.Fixed(18, 64, 380, 22), "showOffhandIndicatorLabel")
+                .AddSwitch(OnShowOffhandIndicatorToggled, ElementBounds.Fixed(434, 61, 28, 28), "showOffhandIndicator")
+                .AddStaticText("Center hotbar", label, ElementBounds.Fixed(18, 100, 380, 22), "centerLabel")
+                .AddSwitch(OnCenterToggled, ElementBounds.Fixed(434, 97, 28, 28), "centerHotbar")
+                .AddStaticText("Slot key double-tap", label, ElementBounds.Fixed(18, 136, 380, 22), "doubleTapLabel")
+                .AddSwitch(OnDoubleTapToggled, ElementBounds.Fixed(434, 133, 28, 28), "doubleTap")
+                .AddStaticText("Empty offhand", label, ElementBounds.Fixed(18, 172, 380, 22), "offhandLabel")
+                .AddSwitch(OnEmptyOffhandToggled, ElementBounds.Fixed(434, 169, 28, 28), "emptyOffhand")
+                .AddStaticText("Indicator position", label, ElementBounds.Fixed(18, 216, 160, 22), "anchorLabel")
                 .AddDropDown(AnchorValues, AnchorNames, AnchorIndex(),
-                    OnAnchorSelected, ElementBounds.Fixed(180, 141, 282, 26), "anchor")
-                .AddStaticText("Icon offset X", label, ElementBounds.Fixed(18, 182, 130, 22), "offsetXLabel")
+                    OnAnchorSelected, ElementBounds.Fixed(180, 213, 282, 26), "anchor")
+                .AddStaticText("Icon offset X", label, ElementBounds.Fixed(18, 254, 130, 22), "offsetXLabel")
                 .AddSmallButton("-", () => NudgeOffset(axisX: true, -1),
-                    ElementBounds.Fixed(160, 180, 24, 24), EnumButtonStyle.Small, "offsetXMinus")
+                    ElementBounds.Fixed(160, 252, 24, 24), EnumButtonStyle.Small, "offsetXMinus")
                 .AddDynamicText(OffsetText(c => c.IconOffsetX), small,
-                    ElementBounds.Fixed(192, 182, 55, 22), "offsetX")
+                    ElementBounds.Fixed(192, 254, 55, 22), "offsetX")
                 .AddSmallButton("+", () => NudgeOffset(axisX: true, 1),
-                    ElementBounds.Fixed(252, 180, 24, 24), EnumButtonStyle.Small, "offsetXPlus")
-                .AddStaticText("Icon offset Y", label, ElementBounds.Fixed(18, 216, 130, 22), "offsetYLabel")
+                    ElementBounds.Fixed(252, 252, 24, 24), EnumButtonStyle.Small, "offsetXPlus")
+                .AddStaticText("Icon offset Y", label, ElementBounds.Fixed(18, 288, 130, 22), "offsetYLabel")
                 .AddSmallButton("-", () => NudgeOffset(axisX: false, -1),
-                    ElementBounds.Fixed(160, 214, 24, 24), EnumButtonStyle.Small, "offsetYMinus")
+                    ElementBounds.Fixed(160, 286, 24, 24), EnumButtonStyle.Small, "offsetYMinus")
                 .AddDynamicText(OffsetText(c => c.IconOffsetY), small,
-                    ElementBounds.Fixed(192, 216, 55, 22), "offsetY")
+                    ElementBounds.Fixed(192, 288, 55, 22), "offsetY")
                 .AddSmallButton("+", () => NudgeOffset(axisX: false, 1),
-                    ElementBounds.Fixed(252, 214, 24, 24), EnumButtonStyle.Small, "offsetYPlus")
+                    ElementBounds.Fixed(252, 286, 24, 24), EnumButtonStyle.Small, "offsetYPlus")
+                .AddStaticText("Click a keybind, then press a key or mouse button. Escape cancels.",
+                    small, ElementBounds.Fixed(18, 328, 444, 36), "bindsLabel")
+                .AddStaticText(BindableHotkeyNames[0], label, ElementBounds.Fixed(18, 374, 240, 24), "bindSelectLabel")
+                .AddSmallButton(BindButtonText(BindableHotkeyCodes[0]), () => BeginKeyCapture(BindableHotkeyCodes[0]),
+                    ElementBounds.Fixed(270, 372, 192, 26), EnumButtonStyle.Small, "bindSelect")
+                .AddStaticText(BindableHotkeyNames[1], label, ElementBounds.Fixed(18, 406, 240, 24), "bindOffhandLabel")
+                .AddSmallButton(BindButtonText(BindableHotkeyCodes[1]), () => BeginKeyCapture(BindableHotkeyCodes[1]),
+                    ElementBounds.Fixed(270, 404, 192, 26), EnumButtonStyle.Small, "bindOffhand")
+                .AddStaticText(BindableHotkeyNames[2], label, ElementBounds.Fixed(18, 438, 240, 24), "bindIndicatorLabel")
+                .AddSmallButton(BindButtonText(BindableHotkeyCodes[2]), () => BeginKeyCapture(BindableHotkeyCodes[2]),
+                    ElementBounds.Fixed(270, 436, 192, 26), EnumButtonStyle.Small, "bindIndicator")
                 .AddStaticText(
                     "Centering applies only to compatible layouts and falls back automatically. " +
-                    "With the indicator hidden, entering Open Hand is hotkey-only. " +
-                    "Slot key double-tap selects Open Hand when the active slot's number key is pressed again.",
-                    small, ElementBounds.Fixed(18, 258, 444, 90), "help")
+                    "The empty offhand switch enables the offhand toggle key; the selection and " +
+                    "toggle states persist across relogs and the substitution is dropped when " +
+                    "the switch is turned off. The indicator switches control the main-hand cell " +
+                    "and the offhand feedback independently.",
+                    small, ElementBounds.Fixed(18, 480, 444, 80), "help")
                 .AddSmallButton("Reset defaults", ResetDefaults,
-                    ElementBounds.Fixed(18, 374, 120, 28), EnumButtonStyle.Small, "reset")
+                    ElementBounds.Fixed(18, 580, 120, 28), EnumButtonStyle.Small, "reset")
                 .AddSmallButton("Done", () => TryClose(),
-                    ElementBounds.Fixed(372, 374, 90, 28), EnumButtonStyle.Small, "done")
+                    ElementBounds.Fixed(372, 580, 90, 28), EnumButtonStyle.Small, "done")
             .EndChildElements()
             // Without Compose the static texture is never built: the dialog
             // opens (mouse ungrabbed) but renders nothing.
             .Compose();
 
         Composers["settings"].GetSwitch("showIndicator").SetValue(config().ShowIndicator);
+        Composers["settings"].GetSwitch("showOffhandIndicator").SetValue(config().ShowOffhandIndicator);
         Composers["settings"].GetSwitch("centerHotbar").SetValue(config().CenterHotbar);
         Composers["settings"].GetSwitch("doubleTap").SetValue(config().DoubleTapHotbarKey);
+        Composers["settings"].GetSwitch("emptyOffhand").SetValue(config().EmptyOffhandEnabled);
+    }
+
+    private string BindButtonText(string hotkeyCode)
+    {
+        if (capturingHotKeyCode == hotkeyCode)
+        {
+            return "Press a key…";
+        }
+
+        return capi.Input.HotKeys.TryGetValue(hotkeyCode, out HotKey? hotkey)
+            ? hotkey.CurrentMapping.ToString()
+            : "unbound";
+    }
+    private bool BeginKeyCapture(string hotKeyCode)
+    {
+        if (capturingHotKeyCode == hotKeyCode)
+        {
+            return true;
+        }
+
+        if (capturingHotKeyCode is not null)
+        {
+            // Switching buttons mid-capture: drop the previous capture.
+            StopCaptureListeners();
+        }
+
+        capturingHotKeyCode = hotKeyCode;
+        capi.Event.KeyDown += OnCaptureKeyDown;
+
+        // Rebuild so the capturing button shows "Press a key…".
+        Composers.ClearComposers();
+        ComposeDialog();
+        return true;
+    }
+
+    private void OnCaptureKeyDown(KeyEvent args)
+    {
+        args.Handled = true;
+
+        if (args.KeyCode == (int)GlKeys.Escape)
+        {
+            FinishCapture(applied: false, 0, ctrl: false, alt: false, shift: false);
+            return;
+        }
+
+        // Bare modifier presses build no binding; wait for the modified key.
+        switch ((GlKeys)args.KeyCode)
+        {
+            case GlKeys.LShift or GlKeys.RShift or GlKeys.LControl or GlKeys.RControl or
+                GlKeys.LAlt or GlKeys.RAlt or GlKeys.Menu:
+                return;
+        }
+
+        FinishCapture(applied: true, args.KeyCode, args.CtrlPressed, args.AltPressed, args.ShiftPressed);
+    }
+
+    private void FinishCapture(bool applied, int keyCode, bool ctrl, bool alt, bool shift)
+    {
+        StopCaptureListeners();
+        string? hotkeyCode = capturingHotKeyCode;
+        capturingHotKeyCode = null;
+
+        if (applied && hotkeyCode is not null &&
+            capi.Input.HotKeys.TryGetValue(hotkeyCode, out HotKey? hotkey))
+        {
+            hotkey.CurrentMapping = new KeyCombination
+            {
+                KeyCode = keyCode,
+                SecondKeyCode = null,
+                Ctrl = ctrl,
+                Alt = alt,
+                Shift = shift,
+                OnKeyUp = false
+            };
+            // Vanilla's own remap path: persist to the client settings (read
+            // back at hotkey registration) and keep the dispatcher order so a
+            // mouse-bound hotkey is reached before vanilla's mouse consumers.
+            OpenHandHotkeyBinding.Persist(capi, hotkeyCode, hotkey.CurrentMapping);
+            OpenHandHotkeyBinding.ApplyPriority(capi, hotkeyCode);
+        }
+
+        // Rebuild so every bind button reflects the current mapping.
+        Composers.ClearComposers();
+        ComposeDialog();
+    }
+
+    private void StopCaptureListeners()
+    {
+        capi.Event.KeyDown -= OnCaptureKeyDown;
     }
 
     private int AnchorIndex()
@@ -109,17 +303,23 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
         return index < 0 ? 0 : index;
     }
 
-    private string OffsetText(Func<OpenHandClientConfig, int> selector) =>
+    private string OffsetText(System.Func<OpenHandClientConfig, int> selector) =>
         $"{selector(config())} px";
 
     private void OnShowIndicatorToggled(bool on) =>
         applyAndSave(c => c.ShowIndicator = on);
+
+    private void OnShowOffhandIndicatorToggled(bool on) =>
+        applyAndSave(c => c.ShowOffhandIndicator = on);
 
     private void OnCenterToggled(bool on) =>
         applyAndSave(c => c.CenterHotbar = on);
 
     private void OnDoubleTapToggled(bool on) =>
         applyAndSave(c => c.DoubleTapHotbarKey = on);
+
+    private void OnEmptyOffhandToggled(bool on) =>
+        applyAndSave(c => c.EmptyOffhandEnabled = on);
 
     // Single-select dropdowns invoke (selectedValue, true); the value is the
     // stored anchor string itself.
@@ -148,8 +348,10 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
             c.IconOffsetX = 0;
             c.IconOffsetY = 0;
             c.ShowIndicator = true;
+            c.ShowOffhandIndicator = true;
             c.CenterHotbar = true;
             c.DoubleTapHotbarKey = false;
+            c.EmptyOffhandEnabled = false;
         });
         Composers.ClearComposers();
         ComposeDialog();
@@ -158,6 +360,12 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
 
     public override void Dispose()
     {
+        if (capturingHotKeyCode is not null)
+        {
+            StopCaptureListeners();
+            capturingHotKeyCode = null;
+        }
+
         Composers?.ClearComposers();
         base.Dispose();
     }

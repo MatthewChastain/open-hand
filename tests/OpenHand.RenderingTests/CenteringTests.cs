@@ -159,7 +159,13 @@ internal static class CenteringTests
         // Exercise the actual ModSystem registration path twice, as happens
         // when client and integrated server start in the same process.
         ICoreClientAPI api = DispatchProxy.Create<ICoreClientAPI, RecordingProxy>();
-        ((RecordingProxy)api).Handler = (method, _) => throw new InvalidOperationException(method.Name);
+        // ApplyPatches logs through api.Logger on its guarded failure path
+        // (e.g. the absent CarryOn patches); a permissive logger keeps that
+        // degradation path observable without a game window.
+        ILogger logger = TestFakes.Proxy<ILogger>((method, _) => TestFakes.Default(method));
+        ((RecordingProxy)api).Handler = (method, _) => method.Name == "get_Logger"
+            ? logger
+            : throw new InvalidOperationException(method.Name);
         OpenHandModSystem system = new();
         try
         {

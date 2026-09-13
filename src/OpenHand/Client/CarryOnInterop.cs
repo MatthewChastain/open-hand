@@ -24,6 +24,8 @@ namespace OpenHand.Client;
 // - 1.14.x: static CarryableExtensions.GetCarried(Entity, slot-enum)
 //   extension, resolved by AccessTools.TypeByName.
 // A missing or renamed API under either layout simply reports "not carrying".
+// Used on BOTH sides: the client locks selection/toggle input while the
+// server validates toggle requests — CarryOnLib tracks carry state on both.
 internal static class CarryOnInterop
 {
     private const string LibSystemName = "CarryOn.CarryOnLib.CarryOnLibSystem";
@@ -92,6 +94,29 @@ internal static class CarryOnInterop
         return TryResolveExtension();
     }
 
+    /// <summary>
+    /// One-line state of the interop for `/openhand status`: which CarryOn
+    /// layout (if any) is reachable and what a not-carrying answer means.
+    /// Never throws and never changes resolution state.
+    /// </summary>
+    internal static string Describe()
+    {
+        if (!Resolve())
+        {
+            return "CarryOn: not found — carry state unavailable, reported as not carrying.";
+        }
+
+        if (instanceGetCarried is not null)
+        {
+            object? manager = carryManagerProperty!.GetValue(libSystem);
+            return manager is null
+                ? "CarryOn 2.x resolved; its carry manager is not wired yet (reports as not carrying)."
+                : "CarryOn 2.x resolved (CarryOnLib ICarryManager).";
+        }
+
+        return "CarryOn 1.14.x resolved (CarryableExtensions.GetCarried).";
+    }
+
     // CarryOn 2.0.0: CarryOnLibSystem (in the CarryOnLib library mod) exposes
     // an ICarryManager instance whose GetCarried(Entity, CarrySlot) reports
     // carried state. CarrySystem.Start assigns the manager
@@ -114,7 +139,7 @@ internal static class CarryOnInterop
             return false;
         }
 
-        object? system = OpenHandModSystem.ClientApi?.ModLoader.GetModSystem(LibSystemName);
+        object? system = OpenHandModSystem.AnyApi?.ModLoader.GetModSystem(LibSystemName);
         if (system is null)
         {
             return false;

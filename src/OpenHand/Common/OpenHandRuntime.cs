@@ -5,12 +5,37 @@ namespace OpenHand.Common;
 
 public static class OpenHandRuntime
 {
-    private static readonly ConcurrentDictionary<string, OpenHandSelectionState> States = new();
+    // Single-player runs the client and server in ONE process, and the client
+    // applies toggle requests optimistically before the server confirms. The
+    // sides must therefore keep SEPARATE state: a shared dictionary let the
+    // client's optimistic write satisfy the server's own stale-revision gate
+    // — the server read the client's just-written revision as its own,
+    // rejected every request as stale, and the persistence write never ran
+    // (the bug that kept the toggles from surviving a relog). The
+    // request/update messages keep the two views synchronized,
+    // server-authoritative.
+    private static readonly ConcurrentDictionary<(EnumAppSide Side, string Uid), OpenHandSelectionState> States = new();
     private static readonly EmptyHandDummySlot EmptyHandSlot = new();
+
+    // The empty-offhand toggle's per-player state and its own substituted
+    // slot. Independent of the main-hand selection: both hands can be
+    // substituted at once, so the offhand has its own dummy and inventory —
+    // sharing either with the main hand would let one state corrupt the
+    // other's slot contract (GetSlotId / membership).
+    private static readonly ConcurrentDictionary<(EnumAppSide Side, string Uid), OpenHandOffhandState> OffhandStates = new();
+    private static readonly EmptyHandDummySlot EmptyOffhandSlot = new();
+    private static DummyInventory? offhandContainingInventory;
+
+    // The per-side partition for a player. The entity's API is the real
+    // discriminator (the server handler holds the server player, client input
+    // holds the client player), and a null API only exists in tests — those
+    // resolve to the client partition.
+    private static (EnumAppSide Side, string Uid) Key(IPlayer player) =>
+        (player.Entity.Api?.Side ?? EnumAppSide.Client, player.PlayerUID);
 
     public static bool IsSelected(IPlayer? player) =>
         player is not null &&
-        States.TryGetValue(player.PlayerUID, out OpenHandSelectionState state) &&
+        States.TryGetValue(Key(player), out OpenHandSelectionState state) &&
         state.IsSelected;
 
     public static ItemSlot EmptySlot => EmptyHandSlot;
@@ -94,7 +119,7 @@ public static class OpenHandRuntime
     }
 
     public static OpenHandSelectionState Get(IPlayer player) =>
-        States.GetOrAdd(player.PlayerUID, _ => OpenHandSelectionState.Unselected(player.InventoryManager.ActiveHotbarSlotNumber));
+        States.GetOrAdd(Key(player), _ => OpenHandSelectionState.Unselected(player.InventoryManager.ActiveHotbarSlotNumber));
 
     public static OpenHandSelectionState Set(IPlayer player, bool selected, int rememberedHotbarSlot, int revision)
     {
@@ -110,30 +135,108 @@ public static class OpenHandRuntime
             EmptyHandSlot.Itemstack = null;
         }
 
-        States.AddOrUpdate(player.PlayerUID, next, (_, current) => revision >= current.Revision ? next : current);
-        return States[player.PlayerUID];
+        (EnumAppSide side, string uid) = Key(player);
+        States.AddOrUpdate((side, uid), next, (_, current) => revision >= current.Revision ? next : current);
+        return States[(side, uid)];
+    }
+
+    // The offhand mirror of EmptySlotFor: the substituted offhand slot
+    // satisfies the same vanilla slot contract — Inventory non-null, real
+    // member (index 0) of a mod-owned one-slot DummyInventory.
+    public static ItemSlot EmptyOffhandSlotFor(IPlayer player)
+    {
+        EnsureOffhandContainingInventory(player.Entity.Api);
+        return EmptyOffhandSlot;
+    }
+
+    private static void EnsureOffhandContainingInventory(ICoreAPI api)
+    {
+        lock (InventoryLock)
+        {
+            if (offhandContainingInventory is not null && ReferenceEquals(offhandContainingInventory.Api, api))
+            {
+                return;
+            }
+
+            DummyInventory inventory = new(api);
+            inventory[0] = EmptyOffhandSlot;
+            EmptyOffhandSlot.AttachInventory(inventory);
+            offhandContainingInventory = inventory;
+        }
+    }
+
+    // The offhand half of the sweep: the same artifacts the main hand sees
+    // (CarryOn locks the left-hand slot through EntityAgent.LeftHandItemSlot,
+    // whose getter returns this substituted slot while the toggle is active)
+    // must never reach the engine through the substituted getter.
+    public static void SweepOffhandSlot()
+    {
+        lock (InventoryLock)
+        {
+            if (offhandContainingInventory is null)
+            {
+                return;
+            }
+
+            if (!ReferenceEquals(offhandContainingInventory[0], EmptyOffhandSlot))
+            {
+                offhandContainingInventory[0] = EmptyOffhandSlot;
+            }
+
+            if (!EmptyOffhandSlot.Empty)
+            {
+                EmptyOffhandSlot.Itemstack = null;
+            }
+        }
+    }
+
+    public static bool IsOffhandEmpty(IPlayer? player) =>
+        player is not null &&
+        OffhandStates.TryGetValue(Key(player), out OpenHandOffhandState state) &&
+        state.IsEmpty;
+
+    public static OpenHandOffhandState GetOffhandState(IPlayer player) =>
+        OffhandStates.GetOrAdd(Key(player), _ => new OpenHandOffhandState(false, 0));
+
+    public static OpenHandOffhandState SetOffhandEmpty(IPlayer player, bool empty, int revision)
+    {
+        OpenHandOffhandState next = new(empty, revision);
+        (EnumAppSide side, string uid) = Key(player);
+        OffhandStates.AddOrUpdate((side, uid), next, (_, current) => revision >= current.Revision ? next : current);
+        return OffhandStates[(side, uid)];
     }
 
     public static void Clear(IPlayer? player)
     {
         if (player is not null)
         {
-            States.TryRemove(player.PlayerUID, out _);
+            (EnumAppSide side, string uid) = Key(player);
+            States.TryRemove((side, uid), out _);
+            OffhandStates.TryRemove((side, uid), out _);
         }
     }
 
     public static void ClearAll()
     {
         States.Clear();
+        OffhandStates.Clear();
         lock (InventoryLock)
         {
             // Deliberately leave slot.Inventory attached: it must stay non-null
             // even in the window before the next world's first EmptySlotFor
             // call. The stale instance is replaced once the new API is known.
             containingInventory = null;
+            offhandContainingInventory = null;
         }
     }
 
-    public static IReadOnlyDictionary<string, OpenHandSelectionState> Snapshot() =>
-        new Dictionary<string, OpenHandSelectionState>(States);
+    // The join-replay snapshots read ONE side's partition (the server's),
+    // flattened back to uid-keyed form for the wire.
+    public static IReadOnlyDictionary<string, OpenHandSelectionState> Snapshot(EnumAppSide side) =>
+        States.Where(pair => pair.Key.Side == side)
+            .ToDictionary(pair => pair.Key.Uid, pair => pair.Value);
+
+    public static IReadOnlyDictionary<string, OpenHandOffhandState> OffhandSnapshot(EnumAppSide side) =>
+        OffhandStates.Where(pair => pair.Key.Side == side)
+            .ToDictionary(pair => pair.Key.Uid, pair => pair.Value);
 }

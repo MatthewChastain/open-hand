@@ -20,6 +20,11 @@ public sealed class OpenHandModSystem : ModSystem
 
     internal static ICoreClientAPI? ClientApi { get; private set; }
 
+    // Side-agnostic handle for shared services that need the mod loader on
+    // either side (CarryOnInterop's carry-state resolution). Set by whichever
+    // Start method runs; single-player keeps the client value.
+    internal static ICoreAPI? AnyApi { get; private set; }
+
     /// <summary>
     /// Current hotbar centering translation in screen pixels, or zero when
     /// inactive. Client renderers may add this to hotbar-attached coordinates.
@@ -34,17 +39,20 @@ public sealed class OpenHandModSystem : ModSystem
     public override void StartClientSide(ICoreClientAPI api)
     {
         ClientApi = api;
+        AnyApi = api;
         ApplyPatches(api);
         ApplyClientConfig(api);
         clientController = new OpenHandClientController(
             api, () => ToggleSettingsDialog(api),
             () => clientConfig.ShowIndicator,
-            () => clientConfig.DoubleTapHotbarKey);
+            () => clientConfig.DoubleTapHotbarKey,
+            () => clientConfig.EmptyOffhandEnabled);
         ReportClientConflicts();
 
         // GL texture IDs change across world transitions and texture reloads;
         // drop the cached indicator texture so it is re-uploaded next render.
         api.Event.LeftWorld += Patches.HudHotbarPatch.OnLeftWorld;
+        api.Event.LeftWorld += Patches.CarryOnHudPatch.ResetLastGeometry;
         api.Event.ReloadTextures += Patches.HudHotbarPatch.ResetIconTexture;
 
         RegisterStatusCommand(api);
@@ -57,6 +65,7 @@ public sealed class OpenHandModSystem : ModSystem
 
     public override void StartServerSide(ICoreServerAPI api)
     {
+        AnyApi = api;
         ApplyPatches(api);
         serverController = new OpenHandServerController(api);
         RegisterServerStatusCommand(api);
@@ -73,7 +82,10 @@ public sealed class OpenHandModSystem : ModSystem
     [
         typeof(ActiveHandPatch),
         typeof(HudHotbarPatch),
-        typeof(CarryOnHudPatch)
+        typeof(OffhandInventoryPatch),
+        typeof(OffhandEntityPatch),
+        typeof(CarryOnHudPatch),
+        typeof(CarryOnRenderOrderPatch)
     ];
 
     private void ApplyPatches(ICoreAPI api)
@@ -89,7 +101,10 @@ public sealed class OpenHandModSystem : ModSystem
                 {
                     nameof(ActiveHandPatch) => ActiveHandPatch.TargetMethod(),
                     nameof(HudHotbarPatch) => HudHotbarPatch.TargetMethod(),
+                    nameof(OffhandInventoryPatch) => OffhandInventoryPatch.TargetMethod(),
+                    nameof(OffhandEntityPatch) => OffhandEntityPatch.TargetMethod(),
                     nameof(CarryOnHudPatch) => CarryOnHudPatch.TargetMethod(),
+                    nameof(CarryOnRenderOrderPatch) => CarryOnRenderOrderPatch.TargetMethod(),
                     _ => null
                 };
                 if (target is not null && Harmony.GetPatchInfo(target)?.Owners.Contains(HarmonyId) == true)
@@ -152,10 +167,19 @@ public sealed class OpenHandModSystem : ModSystem
     // runtime, persist. UI surfaces decide their own feedback.
     internal void ApplyAndSaveClientConfig(Action<OpenHandClientConfig> mutate)
     {
+        bool wasEmptyOffhandEnabled = clientConfig.EmptyOffhandEnabled;
         mutate(clientConfig);
         HudHotbarPatch.ApplyConfig(
             clientConfig,
             OpenHandClientConfig.ParseIconAnchor(clientConfig.IconAnchor));
+
+        // The feature switch gates the live substitution too: turning it off
+        // while the offhand is substituted drops the substitution at once.
+        if (wasEmptyOffhandEnabled && !clientConfig.EmptyOffhandEnabled)
+        {
+            clientController?.DisableEmptyOffhand();
+        }
+
         try
         {
             ClientApi?.StoreModConfig(clientConfig, OpenHandClientConfig.ConfigFileName);
@@ -235,6 +259,18 @@ public sealed class OpenHandModSystem : ModSystem
         return TextCommandResult.Success(message);
     }
 
+    // Client-side feature switch for the empty offhand; mirrors SetDoubleTap.
+    // Disabling here also drops any live substitution.
+    private TextCommandResult SetEmptyOffhand(bool enabled)
+    {
+        ApplyAndSaveClientConfig(c => c.EmptyOffhandEnabled = enabled);
+        string message = enabled
+            ? "Open Hand empty offhand enabled: the toggle hotkey is active."
+            : "Open Hand empty offhand disabled.";
+        ClientApi?.ShowChatMessage(message);
+        return TextCommandResult.Success(message);
+    }
+
     // Generic conflict detection: WHO patches the methods Open Hand relies on
     // (via Harmony patch ownership), never WHAT mod it is. Behavior never
     // branches on these names; they only shape warning text.
@@ -292,6 +328,12 @@ public sealed class OpenHandModSystem : ModSystem
                     lines.Add($"Selected: {(state.IsSelected ? "yes" : "no")}");
                     lines.Add($"Remembered hotbar slot: {state.RememberedHotbarSlot}");
                     lines.Add($"Server revision: {state.Revision}");
+                    lines.Add($"Empty offhand: {(OpenHandRuntime.IsOffhandEmpty(player) ? "active" : "off")} (revision {OpenHandRuntime.GetOffhandState(player).Revision})");
+                    lines.Add(CarryOnInterop.Describe());
+                    if (CarryOnInterop.IsCarryingHands(player.Entity))
+                    {
+                        lines.Add("Hands carry: ACTIVE — selection and the empty-offhand toggle are locked until the block is placed or dropped.");
+                    }
                 }
 
                 lines.Add($"Applied patches: {(AppliedPatches.Count > 0 ? string.Join(", ", AppliedPatches) : "none")}");
@@ -331,6 +373,12 @@ public sealed class OpenHandModSystem : ModSystem
                     lines.Add($"Selected: {(state.IsSelected ? "yes" : "no")}");
                     lines.Add($"Remembered hotbar slot: {state.RememberedHotbarSlot}");
                     lines.Add($"Server revision: {state.Revision}");
+                    lines.Add($"Empty offhand: {(OpenHandRuntime.IsOffhandEmpty(player) ? "active" : "off")} (revision {OpenHandRuntime.GetOffhandState(player).Revision})");
+                    lines.Add(CarryOnInterop.Describe());
+                    if (CarryOnInterop.IsCarryingHands(player.Entity))
+                    {
+                        lines.Add("Hands carry: ACTIVE — selection and the empty-offhand toggle are locked until the block is placed or dropped.");
+                    }
                 }
 
                 lines.Add($"Applied patches: {(AppliedPatches.Count > 0 ? string.Join(", ", AppliedPatches) : "none")}");
@@ -400,6 +448,21 @@ public sealed class OpenHandModSystem : ModSystem
             .WithDescription("Toggles the saved double-tap preference")
             .HandleWith(_ => SetDoubleTap(!clientConfig.DoubleTapHotbarKey))
             .EndSubCommand()
+            .EndSubCommand()
+            .BeginSubCommand("offhand")
+            .WithDescription("Controls the empty-offhand toggle feature")
+            .BeginSubCommand("on")
+            .WithDescription("Enables the empty-offhand toggle hotkey")
+            .HandleWith(_ => SetEmptyOffhand(true))
+            .EndSubCommand()
+            .BeginSubCommand("off")
+            .WithDescription("Disables the empty-offhand toggle hotkey and drops any active substitution")
+            .HandleWith(_ => SetEmptyOffhand(false))
+            .EndSubCommand()
+            .BeginSubCommand("toggle")
+            .WithDescription("Toggles the saved empty-offhand preference")
+            .HandleWith(_ => SetEmptyOffhand(!clientConfig.EmptyOffhandEnabled))
+            .EndSubCommand()
             .EndSubCommand();
     }
 
@@ -417,9 +480,11 @@ public sealed class OpenHandModSystem : ModSystem
         if (clientApi is not null)
         {
             clientApi.Event.LeftWorld -= Patches.HudHotbarPatch.OnLeftWorld;
+            clientApi.Event.LeftWorld -= Patches.CarryOnHudPatch.ResetLastGeometry;
             clientApi.Event.ReloadTextures -= Patches.HudHotbarPatch.ResetIconTexture;
         }
 
         ClientApi = null;
+        AnyApi = null;
     }
 }

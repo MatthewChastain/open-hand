@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/OpenHand/Common/OpenHandSelectionState.cs" Link="OpenHandSelectionState.cs" />
+    <Compile Include="../../src/OpenHand/Common/OpenHandOffhandState.cs" Link="OpenHandOffhandState.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandDoubleTap.cs" Link="OpenHandDoubleTap.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandWheelRing.cs" Link="OpenHandWheelRing.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandGapSolver.cs" Link="OpenHandGapSolver.cs" />
@@ -13,5 +14,10 @@
     <Compile Include="../../src/OpenHand/Common/OpenHandHudGeometry.cs" Link="OpenHandHudGeometry.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandCenteringGeometry.cs" Link="OpenHandCenteringGeometry.cs" />
     <Compile Include="../../src/OpenHand/Common/OpenHandCarryAnchorSolver.cs" Link="OpenHandCarryAnchorSolver.cs" />
+    <!-- The protocol messages are pure data contracts; the round-trip tests
+         run against the NuGet serializer (wire-compatible with the game's
+         own protobuf-net 3.x, which the CI environment cannot ship). -->
+    <Compile Include="../../src/OpenHand/Common/OpenHandProtocol.cs" Link="OpenHandProtocol.cs" />
+    <PackageReference Include="protobuf-net" Version="3.2.45" />
   </ItemGroup>
 </Project>

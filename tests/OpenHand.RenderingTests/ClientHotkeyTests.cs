@@ -1,5 +1,6 @@
 using System.Reflection;
 using OpenHand;
+using OpenHand.Common;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 
@@ -7,14 +8,17 @@ internal static class ClientHotkeyTests
 {
     internal static void Run()
     {
-        Dictionary<string, HotKey> hotkeys = new();
         IInputAPI input = DispatchProxy.Create<IInputAPI, RecordingProxy>();
+        var hotkeyDict = new Vintagestory.API.Datastructures.OrderedDictionary<string, HotKey>();
         ((RecordingProxy)input).Handler = (method, args) =>
         {
+            // The controller constructor re-applies saved-binding priority at
+            // startup; serve the live dictionary it edits.
+            if (method.Name == "get_HotKeys") return hotkeyDict;
             string code = (string)args[0]!;
             if (method.Name == "RegisterHotKey")
             {
-                hotkeys.Add(code, new HotKey
+                hotkeyDict.Add(code, new HotKey
                 {
                     Code = code,
                     KeyCombinationType = (HotkeyType)args[3]!,
@@ -30,33 +34,63 @@ internal static class ClientHotkeyTests
             }
             if (method.Name == "SetHotKeyHandler")
             {
-                hotkeys[code].Handler = (ActionConsumable<KeyCombination>)args[1]!;
+                hotkeyDict[code].Handler = (ActionConsumable<KeyCombination>)args[1]!;
                 return null;
             }
             throw new InvalidOperationException($"Unexpected input call: {method.Name}");
         };
+        List<object> sent = [];
+        Dictionary<string, Delegate> messageHandlers = [];
         IClientNetworkChannel channel = DispatchProxy.Create<IClientNetworkChannel, RecordingProxy>();
-        ((RecordingProxy)channel).Handler = (method, _) =>
-            method.Name is "RegisterMessageType" or "SetMessageHandler"
-                ? channel : throw new InvalidOperationException($"Unexpected network call: {method.Name}");
+        ((RecordingProxy)channel).Handler = (method, args) =>
+        {
+            if (method.Name is "RegisterMessageType" or "SetMessageHandler")
+            {
+                if (method.Name == "SetMessageHandler")
+                {
+                    Delegate handler = (Delegate)args[0]!;
+                    messageHandlers[handler.GetType().GetMethod("Invoke")!.GetParameters()[0].ParameterType.Name] = handler;
+                }
+                return channel;
+            }
+            if (method.Name == "SendPacket")
+            {
+                sent.Add(args[0]!);
+                return null;
+            }
+            if (method.Name == "get_Connected") return true; // the send telemetry reads the handshake state
+            throw new InvalidOperationException($"Unexpected network call: {method.Name}");
+        };
         IClientNetworkAPI network = DispatchProxy.Create<IClientNetworkAPI, RecordingProxy>();
         ((RecordingProxy)network).Handler = (method, _) => method.Name == "RegisterChannel"
             ? channel : throw new InvalidOperationException($"Unexpected network API call: {method.Name}");
         int subscriptions = 0;
+        int tickListeners = 0;
         IClientEventAPI events = DispatchProxy.Create<IClientEventAPI, RecordingProxy>();
         ((RecordingProxy)events).Handler = (method, _) =>
         {
             if (method.Name.StartsWith("add_", StringComparison.Ordinal)) subscriptions++;
             else if (method.Name.StartsWith("remove_", StringComparison.Ordinal)) subscriptions--;
+            else if (method.Name == "RegisterGameTickListener") tickListeners++; // the substituted-slot sweep
+            else if (method.Name == "UnregisterGameTickListener") tickListeners--;
             else throw new InvalidOperationException($"Unexpected event call: {method.Name}");
-            return null;
+            return (long)tickListeners; // the tick registration's long; ignored elsewhere
         };
         ICoreClientAPI api = DispatchProxy.Create<ICoreClientAPI, RecordingProxy>();
+        IClientPlayer player = TestFakes.MakeClientPlayer("uid-client-hotkey", api, new TestFakes.TestInventory(12));
+        TestFakes.SeedControls(player.Entity);
+        IClientWorldAccessor world = TestFakes.Proxy<IClientWorldAccessor>((method, _) =>
+            method.Name == "get_Player" ? player : TestFakes.Default(method));
+        ILogger logger = TestFakes.MakeRecordingLogger(out List<string> log);
         ((RecordingProxy)api).Handler = (method, _) => method.Name switch
         {
             "get_Input" => input,
             "get_Network" => network,
             "get_Event" => events,
+            "get_World" => world,
+            "get_Logger" => logger,
+            // OpenHandRuntime partitions state by the entity API's side.
+            "get_Side" => EnumAppSide.Client,
             // Visibility must not read or change selection or send packets.
             _ => throw new InvalidOperationException($"Unexpected client call: {method.Name}")
         };
@@ -64,10 +98,12 @@ internal static class ClientHotkeyTests
         Action openSettings = () => opens++;
         Type controllerType = typeof(OpenHandModSystem).Assembly.GetType(
             "OpenHand.Client.OpenHandClientController", throwOnError: true)!;
+        bool offhandEnabled = true;
         using IDisposable controller = (IDisposable)Activator.CreateInstance(
-            controllerType, api, openSettings, (Func<bool>)(() => true), (Func<bool>)(() => false))!;
-        HotKey indicator = hotkeys["openhand.indicator"];
-        HotKey select = hotkeys["openhand.select"];
+            controllerType, api, openSettings, (Func<bool>)(() => true), (Func<bool>)(() => false),
+            (Func<bool>)(() => offhandEnabled))!;
+        HotKey indicator = hotkeyDict["openhand.indicator"];
+        HotKey select = hotkeyDict["openhand.select"];
         KeyEvent ctrlTilde = new() { KeyCode = (int)GlKeys.Tilde, CtrlPressed = true };
         KeyEvent tilde = new() { KeyCode = (int)GlKeys.Tilde };
         if (!indicator.DidPress(ctrlTilde, null!, null!, true) ||
@@ -80,10 +116,55 @@ internal static class ClientHotkeyTests
             throw new InvalidOperationException("Settings hotkey did not consume and open");
         indicator.Handler(indicator.CurrentMapping);
         if (opens != 2) throw new InvalidOperationException("Second press did not reach the dialog toggle");
+
+        // Select entry: consumes, optimistically applies, and sends exactly one
+        // request; the fire is logged once with the live binding.
+        HotKey offhand = hotkeyDict["openhand.offhand"];
+        TestFakes.Require(select.Handler(select.CurrentMapping), "the select hotkey consumes its press");
+        TestFakes.Require(sent.Count == 1 && sent[0] is OpenHandSelectionRequest { Selected: true, Revision: 1 },
+            "select entry sends one selection request");
+        TestFakes.Require(OpenHandRuntime.IsSelected(player), "select entry applies the selection optimistically");
+        TestFakes.Require(log.Count(message => message.Contains("openhand.select handler fired")) == 1,
+            "the first select fire is logged exactly once");
+
+        // While carrying, entry is declined (both directions), mutates nothing,
+        // and the decline is logged once per carry episode — never silently.
+        TestFakes.InjectCarry(carrying: true);
+        try
+        {
+            TestFakes.Require(!select.Handler(select.CurrentMapping), "entry while carrying declines");
+            TestFakes.Require(!select.Handler(select.CurrentMapping), "a second carry-locked press still declines");
+            TestFakes.Require(sent.Count == 1, "carry-locked presses send nothing");
+            TestFakes.Require(OpenHandRuntime.IsSelected(player) &&
+                OpenHandRuntime.Get(player).Revision == 1,
+                "carry-locked presses leave the selection state untouched");
+            TestFakes.Require(log.Count(message => message.Contains("declined while carrying")) == 1,
+                "the carry decline is logged once per episode");
+        }
+        finally
+        {
+            TestFakes.ResetCarryInterop();
+        }
+
+        // Released: the offhand toggle acts again (its own request packet).
+        TestFakes.Require(offhand.Handler(offhand.CurrentMapping), "the offhand toggle acts when not carrying");
+        TestFakes.Require(sent.Count == 2 && sent[1] is OpenHandOffhandRequest { IsEmpty: true, Revision: 1 },
+            "the offhand toggle sends its request after the carry clears");
+
+        // A persisted substitution restored at join must not outlive the
+        // feature switch: receiving the restored update while the switch is
+        // off drops it at once with a fresh (persisted) request.
+        offhandEnabled = false;
+        messageHandlers[nameof(OpenHandOffhandUpdate)].DynamicInvoke(
+            new OpenHandOffhandUpdate { PlayerUid = "uid-client-hotkey", IsEmpty = true, Revision = 5 });
+        TestFakes.Require(sent.Count == 3 &&
+            sent[2] is OpenHandOffhandRequest { IsEmpty: false, Revision: 6 },
+            "a restored offhand state is dropped when the feature switch is off");
+
         controller.Dispose();
         indicator.Handler(indicator.CurrentMapping);
-        if (opens != 2 || subscriptions != 0)
-            throw new InvalidOperationException("Controller cleanup left an active callback or subscription");
+        if (opens != 2 || subscriptions != 0 || tickListeners != 0)
+            throw new InvalidOperationException("Controller cleanup left an active callback, subscription, or tick listener");
         Console.WriteLine("Passed settings hotkey registration, modifiers, callback isolation, and disposal checks.");
     }
 }

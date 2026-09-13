@@ -151,6 +151,24 @@ internal static class CenteringIntegrationTests
             HudHotbarPatch.ApplyConfig(config, IconAnchorMode.Auto);
             Update();
             Check(HudHotbarPatch.CenteringOffsetX == 27, "explicit toggle permits retry");
+
+            // A vanilla recompose (any inventory change, e.g. picking up a
+            // carried item) rebuilds the composer's elements: fresh anchor
+            // bound objects at their original offsets while the owned root
+            // survives. Centering must re-own the fresh anchors and keep the
+            // shift instead of blocking until the next settings toggle.
+            ElementBounds gear2 = ElementBounds.Fixed(EnumDialogArea.CenterBottom, 0, 0, 100, 80);
+            ElementBounds text2 = ElementBounds.Fixed(EnumDialogArea.CenterBottom, 0, 0, 400, 0);
+            root.WithChild(gear2).WithChild(text2);
+            root.CalcWorldBounds();
+            elements["tempStabHoverText"] = new GuiElementCustomDraw(api, gear2, (_, _, _) => { });
+            elements["iteminfoHover"] = new GuiElementCustomDraw(api, text2, (_, _, _) => { });
+            Update();
+            Check(HudHotbarPatch.CenteringOffsetX == 27, "recompsed anchors re-owned and re-centered");
+            Check(!HudHotbarPatch.DescribeIconPlacement().Contains("layout ownership changed"),
+                "rebuild does not block centering");
+            Check(gear2.fixedOffsetX == -27, "fresh gear anchor carries the counter-shift");
+
             HudHotbarPatch.OnLeftWorld();
             Check(HudHotbarPatch.CenteringOffsetX == 0 && root.fixedOffsetX == 0, "world exit restores layout");
         }

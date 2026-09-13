@@ -23,11 +23,21 @@ public sealed class OpenHandClientConfig
     public int IconOffsetY { get; set; }
 
     /// <summary>
-    /// Whether the client renders the Open Hand HUD panel, hand cell, and
-    /// selection outline. When disabled, entry is hotkey-only; wheel exit
-    /// and server synchronization are unchanged.
+    /// Whether the client renders the main-hand Open Hand HUD panel, hand
+    /// cell, and selection outline. When disabled, entry is hotkey-only;
+    /// wheel exit and server synchronization are unchanged. Independent of
+    /// <see cref="ShowOffhandIndicator"/>.
     /// </summary>
     public bool ShowIndicator { get; set; } = true;
+
+    /// <summary>
+    /// Whether the client renders the empty-offhand feedback (the ghosted
+    /// offhand cell and its full-slot highlight) while the substitution is
+    /// active. Independent of <see cref="ShowIndicator"/>: hiding either
+    /// visual leaves the toggle itself untouched — it stays hotkey-driven
+    /// and server-validated.
+    /// </summary>
+    public bool ShowOffhandIndicator { get; set; } = true;
 
     /// <summary>
     /// Center a recognized hotbar together with its visible automatic extension.
@@ -46,6 +56,15 @@ public sealed class OpenHandClientConfig
     /// handle itself.
     /// </summary>
     public bool DoubleTapHotbarKey { get; set; }
+
+    /// <summary>
+    /// Enables the empty-offhand functionality: the toggle hotkey
+    /// (openhand.offhand, rebindable in the settings menu) becomes active
+    /// while the switch is on. Off by default; the live substitution is
+    /// server-validated and session-scoped, and disabling the switch also
+    /// drops any active substitution.
+    /// </summary>
+    public bool EmptyOffhandEnabled { get; set; }
 
     /// <summary>Parses the anchor setting; unknown values resolve to Auto.</summary>
     public static IconAnchorMode ParseIconAnchor(string? value)

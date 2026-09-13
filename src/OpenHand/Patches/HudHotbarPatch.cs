@@ -42,6 +42,7 @@ internal static class HudHotbarPatch
     // so interpolation can never soften the final crisp frame stroke.
     private static LoadedTexture? iconFrameTexture;
     private static LoadedTexture? iconGlyphTexture;
+    private static LoadedTexture? offhandShadeTexture;
     private static GuiComposer? extendedComposer;
     private static ContinuousHotbarBackground? continuousBackground;
     private static GuiComposer? failedBackgroundComposer;
@@ -144,6 +145,7 @@ internal static class HudHotbarPatch
     internal static string DescribeIconPlacement()
     {
         return $"indicator={(config.ShowIndicator ? "on" : "off")} " +
+            $"offhandIndicator={(config.ShowOffhandIndicator ? "on" : "off")} " +
             $"{anchorMode.ToString().ToLowerInvariant()} offset=({config.IconOffsetX},{config.IconOffsetY}) | " +
             $"last render: {lastPlacementDescription} | " +
             $"background={(continuousBackground is null ? "vanilla" : $"continuous +{continuousBackground.ExtensionWidth}px")} | " +
@@ -188,6 +190,8 @@ internal static class HudHotbarPatch
         iconFrameTexture = null;
         iconGlyphTexture?.Dispose();
         iconGlyphTexture = null;
+        offhandShadeTexture?.Dispose();
+        offhandShadeTexture = null;
         continuousBackground?.InvalidateTexture();
         failedBackgroundComposer = null;
     }
@@ -291,14 +295,42 @@ internal static class HudHotbarPatch
         ElementBounds? text = composer.GetElement("iteminfoHover")?.Bounds;
         double scale = GuiElement.scaled(1);
         if (centeredLayout is not null &&
-            (!ReferenceEquals(centeredLayout.Bounds, root) ||
-             !centeredLayout.IsIntact(scale) ||
-             (gear is not null && !centeredLayout.HasAnchor(gear)) ||
-             text is null || !centeredLayout.HasAnchor(text)))
+            (!ReferenceEquals(centeredLayout.Bounds, root) || !centeredLayout.IsIntact(scale)))
         {
+            // A different root object, or someone wrote our root offsets:
+            // another layout writer owns the bar now. Yield and require an
+            // explicit retry from the settings toggle.
             centeringBlockedComposer = composer;
             ResetCentering("layout ownership changed; toggle centering to retry");
             return;
+        }
+        if (centeredLayout is not null &&
+            ((gear is not null && !centeredLayout.HasAnchor(gear)) ||
+             (text is not null && !centeredLayout.HasAnchor(text))))
+        {
+            // Vanilla recomposes the hotbar on every inventory change and
+            // rebuilds the composer's elements from scratch, so the anchor
+            // bounds come back as fresh objects at their original offsets
+            // while the root's owned offsets survive. That is a rebuild, not
+            // a foreign writer: re-own the fresh anchors and re-apply the
+            // shift below instead of blocking centering (a carried-item
+            // pickup used to drop the centering shift for the whole session,
+            // visibly jumping the bar inward). A foreign offset write on
+            // unchanged anchor objects is still caught by Apply's intact
+            // check.
+            if (text is null)
+            {
+                ResetCentering("unsupported or independently positioned bounds");
+                return;
+            }
+
+            // The fresh layout must capture the root's PRE-SHIFT offsets as its
+            // originals, so restore them before re-owning (the old layout's
+            // orphaned anchor restores are guarded and harmless).
+            centeredLayout.Restore(scale);
+            centeredLayout = gear is null
+                ? new HotbarCenteringLayout(root, text)
+                : new HotbarCenteringLayout(root, gear, text);
         }
 
         // Respect non-centered/custom-position hotbars rather than overriding
@@ -507,7 +539,7 @@ internal static class HudHotbarPatch
         indicatorRectValid = false;
         rowExtentValid = false;
         backgroundEdgesValid = false;
-        if (!config.ShowIndicator)
+        if (!config.ShowIndicator && !config.ShowOffhandIndicator)
         {
             return;
         }
@@ -521,105 +553,157 @@ internal static class HudHotbarPatch
             return;
         }
 
-        ElementBounds slotZero = slotBounds[0];
-
-        // Adjacent crops of one background never cover a vanilla slot. Draw
-        // after vanilla so recomposition inside OnRenderGUI refreshes both.
         if (player.WorldData.CurrentGameMode == EnumGameMode.Spectator) return;
-        if (__instance is GuiDialog dialog && extendedComposer is not null &&
-            ReferenceEquals(dialog.Composers["hotbar"], extendedComposer) &&
-            ReferenceEquals(extendedComposer.GetElement("element-2"), continuousBackground))
-        {
-            continuousBackground?.RenderExtension(extendedComposer);
-        }
 
-        // Pixel-snap to the truncated screen coordinates vanilla renders slot
-        // textures at ((int)renderX/renderY, OuterWidthInt). Integer math in
-        // final screen pixels keeps the icon aligned with neighboring slots at
-        // every GUI scale and screen resolution. Automatic placement uses an
-        // external left panel so it cannot obstruct the vanilla reserved
-        // mission-skill gap; explicit left/right anchors probe the row.
-        int size = slotZero.OuterWidthInt;
-        (int x, int y, _, string placementDescription) = ResolvePlacement(__instance, slotZero, size);
-        x += config.IconOffsetX;
-        y += config.IconOffsetY;
-        lastPlacementDescription = placementDescription;
-
-        // Re-bake both the direct-composed frame and glyph when the slot size
-        // changes. The frame's crisp final stroke is never resampled.
-        if (iconFrameTexture is null || iconFrameTexture.Width != size ||
-            iconGlyphTexture is null || iconGlyphTexture.Width != size)
+        // The two visuals gate independently: the main-hand cell follows
+        // ShowIndicator, the offhand feedback follows ShowOffhandIndicator.
+        if (config.ShowIndicator)
         {
-            BakeIconTextures(capi, size);
+            ElementBounds slotZero = slotBounds[0];
+
+            // Adjacent crops of one background never cover a vanilla slot.
+            // Draw after vanilla so recomposition inside OnRenderGUI
+            // refreshes both.
+            if (__instance is GuiDialog dialog && extendedComposer is not null &&
+                ReferenceEquals(dialog.Composers["hotbar"], extendedComposer) &&
+                ReferenceEquals(extendedComposer.GetElement("element-2"), continuousBackground))
+            {
+                continuousBackground?.RenderExtension(extendedComposer);
+            }
+
+            // Pixel-snap to the truncated screen coordinates vanilla renders
+            // slot textures at ((int)renderX/renderY, OuterWidthInt). Integer
+            // math in final screen pixels keeps the icon aligned with
+            // neighboring slots at every GUI scale and screen resolution.
+            // Automatic placement uses an external left panel so it cannot
+            // obstruct the vanilla reserved mission-skill gap; explicit
+            // left/right anchors probe the row.
+            int size = slotZero.OuterWidthInt;
+            (int x, int y, _, string placementDescription) = ResolvePlacement(__instance, slotZero, size);
+            x += config.IconOffsetX;
+            y += config.IconOffsetY;
+            lastPlacementDescription = placementDescription;
+
+            // Re-bake both the direct-composed frame and glyph when the slot
+            // size changes. The frame's crisp final stroke is never resampled.
+            if (iconFrameTexture is null || iconFrameTexture.Width != size ||
+                iconGlyphTexture is null || iconGlyphTexture.Width != size)
+            {
+                BakeIconTextures(capi, size);
+            }
+
             if (iconFrameTexture is null || iconFrameTexture.TextureId == 0 ||
                 iconGlyphTexture is null || iconGlyphTexture.TextureId == 0)
             {
                 return;
             }
-        }
 
-        // The Open Hand frame and glyph at the anchor-resolved position.
-        capi.Render.Render2DTexture(iconFrameTexture.TextureId, x, y, size, size, 50f);
-        capi.Render.Render2DTexture(iconGlyphTexture.TextureId, x, y, size, size, 51f);
+            // The Open Hand frame and glyph at the anchor-resolved position.
+            capi.Render.Render2DTexture(iconFrameTexture.TextureId, x, y, size, size, 50f);
+            capi.Render.Render2DTexture(iconGlyphTexture.TextureId, x, y, size, size, 51f);
 
-        indicatorX = x;
-        indicatorY = y;
-        indicatorSize = size;
-        indicatorRectValid = true;
+            indicatorX = x;
+            indicatorY = y;
+            indicatorSize = size;
+            indicatorRectValid = true;
 
-        rowLeft = int.MaxValue;
-        rowRight = int.MinValue;
-        if (grid.SlotBounds is { Length: > 0 } rowBounds)
-        {
-            int slotZeroY = (int)slotZero.renderY;
-            foreach (ElementBounds bound in rowBounds)
+            rowLeft = int.MaxValue;
+            rowRight = int.MinValue;
+            if (grid.SlotBounds is { Length: > 0 } rowBounds)
             {
-                // Same row filter as CollectRowIntervals: cells on other rows
-                // (bag slots above the bar) do not bound the hotbar row.
-                if (bound is null || Math.Abs((int)bound.renderY - slotZeroY) > size / 2)
+                int slotZeroY = (int)slotZero.renderY;
+                foreach (ElementBounds bound in rowBounds)
                 {
-                    continue;
+                    // Same row filter as CollectRowIntervals: cells on other
+                    // rows (bag slots above the bar) do not bound the hotbar row.
+                    if (bound is null || Math.Abs((int)bound.renderY - slotZeroY) > size / 2)
+                    {
+                        continue;
+                    }
+
+                    rowLeft = Math.Min(rowLeft, (int)bound.renderX);
+                    rowRight = Math.Max(rowRight, (int)bound.renderX + bound.OuterWidthInt);
+                }
+            }
+
+            rowExtentValid = rowLeft < rowRight;
+
+            // The background edges are what other HUDs should measure their
+            // gaps against: the vanilla background wraps the cells with
+            // padding, and the Open Hand extension moves the visible left
+            // edge further left.
+            if (__instance is GuiDialog bgDialog &&
+                bgDialog.Composers["hotbar"] is GuiComposer bgComposer &&
+                TryGetHotbarBackgroundBounds(__instance, out ElementBounds bgBounds))
+            {
+                int bgLeftEdge = (int)bgComposer.Bounds.renderX + (int)bgBounds.bgDrawX;
+                int bgRightEdge = bgLeftEdge + (int)bgBounds.OuterWidth;
+                if (ReferenceEquals(bgComposer, extendedComposer) && continuousBackground is not null)
+                {
+                    bgLeftEdge = Math.Min(bgLeftEdge, (int)bgComposer.Bounds.renderX - continuousBackground.ExtensionWidth);
                 }
 
-                rowLeft = Math.Min(rowLeft, (int)bound.renderX);
-                rowRight = Math.Max(rowRight, (int)bound.renderX + bound.OuterWidthInt);
+                backgroundEdgesValid = bgLeftEdge < bgRightEdge;
+                backgroundLeftEdge = bgLeftEdge;
+                backgroundRightEdge = bgRightEdge;
             }
-        }
 
-        rowExtentValid = rowLeft < rowRight;
-
-        // The background edges are what other HUDs should measure their gaps
-        // against: the vanilla background wraps the cells with padding, and
-        // the Open Hand extension moves the visible left edge further left.
-        if (__instance is GuiDialog bgDialog &&
-            bgDialog.Composers["hotbar"] is GuiComposer bgComposer &&
-            TryGetHotbarBackgroundBounds(__instance, out ElementBounds bgBounds))
-        {
-            int bgLeftEdge = (int)bgComposer.Bounds.renderX + (int)bgBounds.bgDrawX;
-            int bgRightEdge = bgLeftEdge + (int)bgBounds.OuterWidth;
-            if (ReferenceEquals(bgComposer, extendedComposer) && continuousBackground is not null)
+            // While selected, layer vanilla's own active slot highlight
+            // texture, drawn exactly the way the slot grid draws it (2px
+            // overscan, z 50).
+            if (OpenHandRuntime.IsSelected(player))
             {
-                bgLeftEdge = Math.Min(bgLeftEdge, (int)bgComposer.Bounds.renderX - continuousBackground.ExtensionWidth);
+                LoadedTexture? highlight = grid.highlightSlotTexture;
+                if (highlight is not null && highlight.TextureId != 0)
+                {
+                    capi.Render.Render2DTexturePremultipliedAlpha(
+                        highlight.TextureId,
+                        x - 2,
+                        y - 2,
+                        size + 4,
+                        size + 4);
+                }
             }
-
-            backgroundEdgesValid = bgLeftEdge < bgRightEdge;
-            backgroundLeftEdge = bgLeftEdge;
-            backgroundRightEdge = bgRightEdge;
         }
 
-        // While selected, layer vanilla's own active slot highlight texture,
-        // drawn exactly the way the slot grid draws it (2px overscan, z 50).
-        if (OpenHandRuntime.IsSelected(player))
+        // While the empty offhand is active, ghost the offhand cell: the
+        // engine reads the hand as empty, but the cell keeps rendering the
+        // real parked item (the offhand grid reads the inventory directly,
+        // and the substitution lives one layer down in the slot resolution).
+        // A translucent shade dims the parked item to signal "suppressed",
+        // and vanilla's own active-slot highlight marks the full cell on top
+        // — together they are unmistakably the toggle's state, not a slot
+        // selection.
+        if (config.ShowOffhandIndicator &&
+            OpenHandRuntime.IsOffhandEmpty(player) &&
+            __instance is GuiDialog offhandDialog &&
+            TryGetOffhandBounds(offhandDialog, out ElementBounds offhandBounds))
         {
-            LoadedTexture? highlight = grid.highlightSlotTexture;
-            if (highlight is not null && highlight.TextureId != 0)
+            int offhandX = (int)offhandBounds.renderX;
+            int offhandY = (int)offhandBounds.renderY;
+            int offhandW = offhandBounds.OuterWidthInt;
+            int offhandH = offhandBounds.OuterHeightInt;
+
+            if (offhandShadeTexture is null || offhandShadeTexture.Width != offhandW)
+            {
+                BakeOffhandShadeTexture(capi, offhandW, offhandH);
+            }
+
+            if (offhandShadeTexture is not null && offhandShadeTexture.TextureId != 0)
             {
                 capi.Render.Render2DTexturePremultipliedAlpha(
-                    highlight.TextureId,
-                    x - 2,
-                    y - 2,
-                    size + 4,
-                    size + 4);
+                    offhandShadeTexture.TextureId, offhandX, offhandY, offhandW, offhandH);
+            }
+
+            LoadedTexture? offhandHighlight = grid.highlightSlotTexture;
+            if (offhandHighlight is not null && offhandHighlight.TextureId != 0)
+            {
+                capi.Render.Render2DTexturePremultipliedAlpha(
+                    offhandHighlight.TextureId,
+                    offhandX - 2,
+                    offhandY - 2,
+                    offhandW + 4,
+                    offhandH + 4);
             }
         }
     }
@@ -915,6 +999,22 @@ internal static class HudHotbarPatch
         iconFrameTexture = frameTexture;
         iconGlyphTexture?.Dispose();
         iconGlyphTexture = glyphTexture;
+    }
+
+    // The empty-offhand ghost shade: a uniform translucent fill drawn over
+    // the parked item so it reads as suppressed rather than selected. Baked
+    // once per cell size, exactly like the icon frame.
+    private static void BakeOffhandShadeTexture(ICoreClientAPI capi, int width, int height)
+    {
+        LoadedTexture shadeTexture = capi.Gui.Icons.GenTexture(width, height, (ctx, _) =>
+        {
+            ctx.SetSourceRGBA(0, 0, 0, 0.5);
+            ctx.Rectangle(0, 0, width, height);
+            ctx.Fill();
+        });
+
+        offhandShadeTexture?.Dispose();
+        offhandShadeTexture = shadeTexture;
     }
 
     private static LoadedTexture? BakeTexture(ICoreClientAPI capi, AssetLocation location, int targetWidth, int targetHeight)
