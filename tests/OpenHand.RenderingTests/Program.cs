@@ -177,6 +177,12 @@ Console.WriteLine($"Passed {cases} continuous-background pixel comparisons, crop
 ClientHotkeyTests.Run();
 ActiveHandInventoryTests.Run();
 CenteringTests.Run();
+OpenHandRuntimeTests.Run();
+ServerControllerTests.Run();
+PatchTargetTests.Run();
+CarryOnInteropTests.Run();
+HotkeyBindingTests.Run();
+ConflictScannerTests.Run();
 
 public class RecordingProxy : DispatchProxy
 {

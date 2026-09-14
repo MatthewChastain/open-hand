@@ -5,9 +5,11 @@ Guidance for AI coding agents working in this repository.
 ## What this is
 
 Open Hand is a code mod for Vintage Story 1.22.x that adds a virtual, always-empty
-main-hand selection to the hotbar. It is **not** an inventory slot: it never stores,
-moves, or mutates item stacks, and the physical hotbar and offhand are untouched.
-The mod is universal (client + server) with server-authoritative selection sync.
+main-hand selection to the hotbar, plus an optional hotkey-toggled empty-offhand
+mode. They are **not** inventory slots: they never store, move, or mutate item
+stacks — the physical hotbar is untouched, and while the offhand toggle is
+active the real item stays parked in its slot. The mod is universal (client +
+server) with server-authoritative selection sync.
 
 ## Commands
 
@@ -46,14 +48,25 @@ re-verify anything version-sensitive after a game update.
   logic (`OpenHandWheelRing`, `OpenHandDoubleTap`), and the client config
 - `src/OpenHand/Client/` — hotkey registration, wheel input, HUD icon rendering, in-game settings dialog
 - `src/OpenHand/Server/` — server authority and selection broadcast
-- `src/OpenHand/Patches/` — the mod's Harmony patches: the two vanilla-target
-  patches below, plus the optional CarryOn HUD patch
+- `src/OpenHand/Patches/` — the mod's Harmony patches: the vanilla-target
+  patches below (main hand and offhand), plus the optional CarryOn HUD patch
 - `src/OpenHand/modinfo.json` — the authoritative mod manifest (see Packaging)
 - `assets/` — assets shipped in the mod zip (HUD texture, mod icon)
 - `assets-src/` — design sources, fully tracked on purpose
-- `tests/OpenHand.StateTests/` — state tests (required check). Links individual
-  `Common/` sources via its csproj `<Compile>` list: every new `Common/` file must
-  be added there or the test project fails to build (CI catches it).
+- `tests/OpenHand.StateTests/` — CI state tests (required check), one suite file
+  per module under a zero-framework console runner (`Program.cs` registers the
+  suites; a failing suite records its exception and the rest still run). Links
+  individual `Common/` sources via its csproj `<Compile>` list: every new
+  `Common/` file must be added there or the test project fails to build (CI
+  catches it). Includes `ProtocolTests` (protobuf wire bytes + round trips
+  against the NuGet `protobuf-net`) and the `openhand.json` config round trip.
+- `tests/OpenHand.RenderingTests/` — local-only, game-DLL-backed tests (outside
+  the solution; not run by CI): continuous-background pixel comparisons,
+  substituted-slot inventory contracts, server request validation (revision
+  gating, carry lock, join/leave, toggle persistence across relogs), the
+  patch-target tripwire, CarryOn interop, hotkey binding priority/persistence
+  targets, and the conflict scanner. Run:
+  `dotnet run --project tests/OpenHand.RenderingTests -c Release` (see Testing).
 - `scripts/package.py` — deterministic release zip packaging
 - `scripts/setup-branch-protection.sh` — re-applies GitHub branch protection
 
@@ -78,12 +91,26 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   occupant either: CarryOn's pick-up replaces the occupant with a
   `LockedItemSlot` wrapper and stacks leak through that wrapper into engine
   item-move paths, duplicating items — tried and reverted.
-- **Only two vanilla patch targets exist**: the `ActiveHotbarSlot` getter and
-  `HudHotbar.OnRenderGUI` (plus reading its private `hotbarSlotGrid` field) in
-  `src/OpenHand/Patches/HudHotbarPatch.cs`. Patches resolve private members via
-  `AccessTools` reflection, and `TargetMethod()` deliberately returns `null`
-  (patch silently no-ops, logged) instead of throwing when a target is missing —
-  the mod degrades gracefully rather than crashing. Keep that behavior.
+- **The main-hand substitution patches only two vanilla targets**: the
+  `ActiveHotbarSlot` getter and `HudHotbar.OnRenderGUI` (plus reading its
+  private `hotbarSlotGrid` field) in `src/OpenHand/Patches/HudHotbarPatch.cs`.
+  Patches resolve private members via `AccessTools` reflection, and
+  `TargetMethod()` deliberately returns `null` (patch silently no-ops, logged)
+  instead of throwing when a target is missing — the mod degrades gracefully
+  rather than crashing. Keep that behavior.
+- **The empty-offhand toggle patches exactly two offhand read paths** (in
+  `src/OpenHand/Patches/OffhandSlotPatches.cs`): the
+  `PlayerInventoryManager.OffhandHotbarSlot` getter (base class — neither
+  `ClientPlayerInventoryManager` nor `ServerPlayerInventoryManager` overrides
+  it, so one patch covers both sides) and the `EntityPlayer.LeftHandItemSlot`
+  override (it re-fetches `GetHotbarInventory()[11]` per call, so the override
+  — never the base `EntityAgent` property — is the target). Verified against
+  decompiled 1.22.7; re-verify on game updates. Substituting only one of the
+  two paths leaks the "empty" lie into whichever system takes the other, and
+  the substituted slot must satisfy the same slot-contract invariant as the
+  main hand. While the toggle is active every mod reading the offhand sees it
+  empty — that is the feature's purpose and is deliberate; the real item
+  stays parked and untouched.
 - **Third-party compatibility patches are allowed, but only as a last
   resort.** Try the simpler tools first — public APIs, engine events,
   reflection reads, or the other mod's own configuration — and patch another
@@ -101,28 +128,93 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   2.0.0-pre.8 (top-level `CarryOn.Client.Logic.HudCarriedRenderer`, same
   method/field names, same scaled(32)/scaled(16) geometry and hardcoded 850px
   bar in `UpdateCachedPositions`); re-verify on CarryOn updates. Every guarded
-  path and the first successful repositioning per side log once per session,
-  so a "the icons didn't move" report is diagnosable from `client-main.log`
-  without a debugger.
+  path logs once per session, and repositionings log on first placement and
+  again whenever the correction inputs change (a carried-item pickup recomposes
+  the hotbar and can move the bar), so a "the icons didn't move" report is
+  diagnosable from `client-main.log` without a debugger.
+  A second guarded target, `CarryOnRenderOrderPatch`, postfixes
+  `HudCarriedRenderer.RenderOrder` to at least 1.01: CarryOn registers at 1.0
+  — the same order as `GuiManager`'s Ortho GUI pass — and
+  `ClientEventManager.RegisterRenderer` inserts a new renderer BEFORE the
+  first entry whose order is not strictly smaller, so carried icons render
+  UNDER every dialog. Vanilla bars never expose this (icons sit outside the
+  bar), but Open Hand's left extension grows the bar into the icon zone and
+  then paints over the icons (reported as "the hotbar is overlapping the
+  CarryOn icons"). 1.01 keeps them below the 1.02 crosshair/cursor. Also:
+  the anchor correction keeps the last rendered hotbar geometry and applies
+  it on frames where the hotbar dialog has not published (world-join
+  ordering, HUD transitions), instead of snapping back to CarryOn's
+  overlapping defaults; the cache clears on world exit and whenever Open Hand
+  applies a changed hotbar appearance (`CarryOnHudPatch.ResetLastGeometry`),
+  so a hidden or repositioned indicator cannot leave CarryOn at stale
+  coordinates. Verified against decompiled CarryOn
+  2.0.0-pre.8 (`HudCarriedRenderer.RenderOrder => 1.0`, registration in
+  `HudCarried` at stage Ortho) and the 1.22.7 client event manager; re-verify
+  on updates.
 - **Patch targets are verified against decompiled 1.22.7 assemblies.** Changes to
   patch targets or game-version assumptions must include decompile evidence in the PR.
 - **Same-value slot assignment is a no-op in vanilla.** Setting
   `ActiveHotbarSlotNumber` to its current value fires no events. Any feature that
   changes selection and needs UI updates (e.g. highlight restore on wheel exit) must
   handle the no-change case explicitly — this caused a real bug before.
+- **The main-hand feature switch gates entry centrally.** `MainHandEnabled`
+  defaults to true so existing configs retain their behavior. Every entry
+  route (hotkey, wheel, indicator click, and digit double-tap) funnels through
+  `OpenHandClientController.SelectOpenHand`, which refuses new selection when
+  disabled; an already-selected state can still exit. Disabling the setting
+  drops an active selection through the server-validated request path unless
+  CarryOn currently locks both hands — never flip the substitution mid-carry.
+  It suppresses the main-hand HUD while off but must never clear the separate
+  `ShowIndicator` preference: re-enabling restores that visual immediately
+  when the preference remains enabled.
 - **HUD icon positioning is pixel-snapped** to vanilla integer slot coordinates
   (unscaled slot size 48, padding 3) and derived from HudHotbar internals at render
   time so it stays correct across GUI scales and resolutions. Icon textures are
   baked at the scaled size with bilinear filtering; watch RGBA channel order when
   manipulating bitmaps.
 - **The server is authoritative.** Selection state is validated server-side and
-  broadcast; the client never trusts its own selection in multiplayer.
+broadcast; the client never trusts its own selection in multiplayer. Both the
+selection and the empty-offhand toggle persist per player: every server-side
+mutation writes through to the player's entity WatchedAttributes (the same
+mechanism CarryOn uses for carries) and the join handler restores the saved
+state into the runtime before the snapshot replay — so both toggles survive
+relogs and server restarts. A persisted offhand state that arrives while the
+client's `EmptyOffhandEnabled` switch is off is dropped at once (the drop
+re-persists the cleared state).
+- **Runtime state is partitioned per API side.** Single-player runs the client
+and server in one process, and the client applies toggle requests
+optimistically before the server confirms. A shared runtime dictionary let
+the client's optimistic write satisfy the server's own stale-revision gate:
+the server read the client's just-written revision as its own, rejected every
+request as stale, and the persistence write never ran — the 1.0.6 bug that
+kept the toggles from surviving a relog (invisible in-session because the
+optimistic state drives the visuals; diagnosable only from the
+`received a … request at revision N while holding revision N — stale` server
+line). `OpenHandRuntime` keys state by (API side, player UID), and the server
+join handler re-seeds the server partition from the persisted truth. Keep the
+client's optimistic writes on the client side of that partition.
+- **The server's join replay arrives before the client's local player exists.**
+Decompiled 1.22.7: `HandleRequestJoin` fires `PlayerJoin` between
+`LevelInitialize` and `LevelFinalize`, so replay packets hit the client while
+the world is still loading and `capi.World.Player` is still null — a client
+handler that ignores updates while the player is null silently DROPS the
+restored state (the restored selection stayed invisible and the next toggle
+bounced off the server's restored revision as stale). The client buffers such
+updates and applies them on the first tick after the player exists, and sends
+one revision-0 refresh pair at ready — the server's stale-revision branch
+answers those with the authoritative state, healing any other missed
+broadcast. See `OpenHandClientController.ApplyJoinReplay`.
 - **Centering is reversible and on by default.** It adds owned layout offsets, not
   render-only shifts. Gear hover and item-name bounds counter-offset the root.
   A guarded transpiler on the existing `HudHotbar.OnRenderGUI` target prepares
   after vanilla rebuilds and adjusts only the skill renderer's X argument.
   If either hook is unavailable, centering stays off. Preserve foreign bounds
   writes and yield rather than repeatedly overriding another mod's layout.
+  Vanilla recomposes the hotbar on every inventory change and rebuilds the
+  composer's elements (fresh anchor bound objects, owned root offsets
+  surviving): centering re-owns the fresh anchors and re-applies the shift —
+  blocking there instead once permanently dropped the shift on the first
+  carried-item pickup, visibly jumping the bar inward for the session.
 - **Patch registration must be idempotent.** Client and server startup can share
   a process; registering the same Harmony patch twice duplicates draw calls.
 - **Digit-key interception rides `capi.Event.KeyDown`, not hotkey registration.**
@@ -151,6 +243,40 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   capture-inputs dialogs open, outside the rect from
   `HudHotbarPatch.TryGetIndicatorRect`, or inside an open dialog's composer
   bounds. With an empty cursor it toggles Open Hand like the hotkey.
+- **Keybind capture, persistence, and mouse dispatch follow vanilla's own
+  paths** (all verified against decompiled 1.22.7; see
+  `OpenHandSettingsDialog` + `OpenHand.Client.OpenHandHotkeyBinding`).
+  Capture: keys ride `capi.Event.KeyDown` (fires before hotkey dispatch);
+  mouse buttons ride the dialog's `CaptureRawMouse()` override — while it
+  returns true, `ClientMain.OnMouseDownRaw` routes every raw click straight
+  to the dialogs (via `GuiManager`) and skips the hotkey manager, which is
+  the ONLY way buttons 4-8 reach a dialog (their clicks never fire
+  `capi.Event.MouseDown`, because no vanilla hotkey routes them into
+  `UpdateMouseButtonState` — the left/middle/right clicks dialogs see are
+  re-dispatched by the `primarymouse`/`secondarymouse`/`middlemouse`
+  handlers in `SystemHotkeys`). This is exactly how vanilla's own settings
+  capture works (`GuiDialog.CaptureRawMouse` doc comment +
+  `GuiDialogEscapeMenu` override). The click that starts a capture is
+  dispatched before capturing begins, so no ignore-next-click dance is
+  needed — the first press the override sees is the intended binding.
+  Persistence: `HotKey.CurrentMapping` alone is session-only; remaps must
+  also go through `ClientSettings.Inst.SetKeyMapping` (reflection —
+  `Vintagestory.Client.NoObf.ClientSettings` lives in VintagestoryLib, which
+  mods do not compile against). That is vanilla's own remap path
+  (`GuiCompositeSettings.CompletedCapture`), it persists to
+  `clientsettings.json`, and `HotkeyManager.RegisterHotKey` reads
+  `ClientSettings.KeyMapping` back at registration. A missing reflection
+  target degrades to session-only bindings (logged once).
+  Dispatch: `HotkeyManager.TriggerHotKey` walks `HotKeys.ValuesOrdered` and
+  stops at the first handler returning true, and vanilla registers its
+  mouse consumers (plus `pickblock` on middle) before any mod hotkey — so a
+  mouse-bound Open Hand hotkey is moved to the FRONT of `capi.Input.HotKeys`
+  (that dictionary IS `hotkeyManager.HotKeys`, `InputAPI`; keyboard bindings
+  move back to the end). Consequently every Open Hand hotkey handler must
+  return **false** whenever it declines — mouse-bound and ungrabbed mouse,
+  carrying locks, feature switch off, same-state no-ops — so declined
+  clicks fall through to vanilla's consumers unchanged. A handler that
+  returns true without acting would eat world clicks.
 
 ## Compatibility policy
 
@@ -159,6 +285,24 @@ These are load-bearing design decisions. Do not weaken them without discussion.
 - Building the game itself requires the .NET 10 SDK (game requirement since 1.22).
 - Known conflict: Forever Empty (both mods modify selected-hand behavior; Open Hand
   warns on startup). Mods that cache or alter `ActiveHotbarSlot` may also conflict.
+- The empty-offhand toggle (hotkey `openhand.offhand`, Shift+tilde by default)
+  substitutes the offhand for as long as it is active: the real item stays
+  parked and untouched, but everything — engine and mods alike — resolves the
+  offhand to an empty slot, which is the feature's purpose and is
+  balance-relevant (e.g. ranged reload checks that require an empty offhand
+  succeed while it is active). State is server-validated and broadcast like
+  the main-hand selection, persists per player across relogs and server
+  restarts (entity WatchedAttributes, restored at join), and the offhand dummy
+  is swept every tick like the main-hand slot. The feature is gated by the
+  `EmptyOffhandEnabled` switch in the settings menu (persisted in
+  `openhand.json`); the switch also drops any live substitution when turned
+  off, and all three Open Hand keybinds are rebindable in the same menu —
+  keys and all eight mouse buttons, persisted and dispatched like vanilla's
+  own controls (see the keybind invariant above). The two HUD visuals are
+  toggled independently in the same menu: `ShowIndicator` (main-hand cell,
+  also gates wheel entry and centering) and `ShowOffhandIndicator` (the
+  ghosted offhand cell + full-slot highlight); hiding either leaves the
+  toggles themselves fully functional.
 - CarryOn is supported: slot membership since 1.0.2 (no crash on container
   pick-up), and since 1.0.3 `CarryOnHudPatch` repositions its carried-item HUD
   anchors, which are hardcoded to a vanilla-centered 850px bar and otherwise
@@ -169,20 +313,54 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   extension to the `ICarryManager` instance on the new CarryOnLib library
   mod); Open Hand supports both the 1.14.x and 2.x layouts, preferring 2.x
   when present.
-- While carrying, Open Hand locks the selection to itself: scrolling is
-  swallowed before vanilla slot cycling, digit keys pass through untouched
-  (never set `Handled` in the KeyDown listener — it receives every key and
-  swallowing strands movement and escape), the same-slot digit press does not
-  exit, slot-change attempts do not deselect, and toggling off is blocked
-  until the block is placed. CarryOn cancels those slot changes anyway, and
-  exiting mid-carry strands the player on a slot that cannot place the block.
-  Carry state is reflection-read in `OpenHand.Client.CarryOnInterop`, which
+- While carrying, Open Hand locks in BOTH directions, for BOTH features: the
+  selection cannot be entered or exited (scrolling is swallowed before vanilla
+  slot cycling, digit keys pass through untouched — never set `Handled` in the
+  KeyDown listener, it receives every key and swallowing strands movement and
+  escape — the same-slot digit press does not exit, slot-change attempts do
+  not deselect), and the empty-offhand toggle cannot be activated or dropped
+  while the carry lasts (the hands-carry slot IS the offhand): the client
+  gates every path (hotkey, wheel, digit double-tap, indicator click falls
+  through by returning false) and the server rejects offhand activations —
+  dropping the SUBSTITUTION stays allowed because the `EmptyOffhandEnabled`
+  switch-off path rides the same request and must always win. The lock is
+  symmetric because CarryOn wraps BOTH hand slots in `LockedItemSlot` for the
+  whole carry (`CarryStateService.SetCarried` locks `RightHandItemSlot` and
+  `LeftHandItemSlot`; `Restore` runs only in `RemoveCarried`, which re-reads
+  those same getters — decompiled CarryOn 2.0.0-pre.8): flipping either
+  substitution mid-carry strands the wrapper in a real hotbar slot (dead
+  until relog), and exiting mid-carry strands the player on a slot that
+  cannot place the block. An entry-only lock was tried and reverted — it is
+  the bug shape that strands wrappers.
+  Carry state is reflection-read on both sides (client input locks, server
+  request validation) in `OpenHand.Client.CarryOnInterop`, which
   supports both shipping CarryOn layouts: 2.0.0 (instance
   `ICarryManager.GetCarried(Entity, CarrySlot)` reached through the
   `CarryOnLibSystem` ModSystem of the separate CarryOnLib library mod —
   CarryOn 2.0.0 requires it) and 1.14.x (static `GetCarried` extension on
   `CarryOn.API.Common.CarryableExtensions`). A missing or renamed API simply
   reports not-carrying, never breaks Open Hand's own input handling.
+- CarryOn carries persist across relog (entity WatchedAttributes), so joining
+  a world while already carrying is normal and the locks above apply from the
+  first tick. If the carried stack was saved corrupt (e.g. by an older
+  Open Hand/CarryOn interaction), the block places as an unknown "?" block and
+  placing can crash in vanilla block behaviors — drop the stuck carry with Q
+  and pick the item up fresh. `/openhand status` reports the CarryOn interop
+  state and a live hands-carry on both sides, the first fire of each Open Hand
+  hotkey logs once with its binding (`handler fired (binding: …)`, described
+  without `KeyCombination.ToString()` — that pulls GlKeyNames/OpenTK), and
+  carry declines log once per carry episode (`declined while carrying`), so a
+  "the hotkey did nothing" report is diagnosable from the logs alone.
+  Persistence telemetry: the client logs the first send of each request kind
+  with the channel's handshake state (`sending … request (channel connected:
+  …)`, failures logged and swallowed instead of crashing the hotkey dispatch),
+  the server logs the first request per player with its revision outcome
+  (`applied a … request … and persisted it` / `stale, re-sending the current
+  state`) and every join's restored state (`joined — restored persisted: …`),
+  so a "the toggles did not survive a relog" report is attributable from
+  `client-main.log` + `server-main.log` alone: a client send with no server
+  line means the packet died in dispatch; a server `applied` line with a join
+  `restored persisted: none` means persistence itself broke.
 - CarryOn's placement transaction leaves two artifacts in the substituted
   slot, both reclaimed by `OpenHandRuntime.SweepSubstitutedSlot()` every game
   tick (client and server): the placed block's stack stays in the active hand
@@ -227,6 +405,26 @@ rejects other formats ("The NetworkVersion of this mod ... is malformed").
   the page's download to it. Comments on the page are publicly viewable and can
   be read by fetching the page.
 
+## Changelog formats
+
+Release notes are produced at release time in two places (see Branching &
+releases), both summarizing only that release's changes.
+
+- **GitHub release notes** — attached to the `v<version>` tag by
+  `gh release create`. Title `Open Hand <version>`; a one-sentence summary
+  naming the release type and what it was validated against (game build,
+  CarryOn versions where relevant); then `##` sections grouped by theme
+  (`## CarryOn compatibility`, `## Fixes`, `## UX`), most significant first;
+  a closing `## Notes` section with support requirements (Vintage Story
+  1.22.x on client and server) and the `/openhand status` diagnostics
+  pointer. Bullets may name the version a change shipped in when a section
+  covers several releases.
+- **Mod DB changelog** — paste-ready HTML for the page's changelog section
+  (the page is hand-maintained; see Branching & releases). One
+  `<h3><version> — <short title></h3>` heading per release, newest first,
+  followed by a `<ul>` of `<li>` items describing that release's
+  user-visible changes, with commands and paths in `<code>`.
+
 ## Local test instance
 
 A private Vintage Story test instance lives outside this repo at `~/code/vs-testing/`
@@ -250,9 +448,46 @@ next launch. The zip name follows the modinfo version, so an unreleased feature 
 overwrites the same `openhand_<version>.zip` as the published release. Never deploy to
 the main (Flatpak) install's mod folder from this repo's workflow.
 
+## Testing
+
+Two projects, both zero-framework console runners (a failing suite records its
+exception and the remaining suites still run; a non-zero exit gates CI):
+
+- `OpenHand.StateTests` (CI, no game DLLs): pure logic — selection/offhand
+  state, wheel ring, double-tap, gap solver, config parsing plus the
+  `openhand.json` round trip (System.Text.Json pins the property names),
+  HUD/centering geometry, the CarryOn anchor solver, and the protocol wire
+  format. The protobuf round trips run against the NuGet `protobuf-net` 3.x
+  (Apache-2.0), wire-compatible with the game's own copy, which CI cannot
+  ship. `ProtocolTests` pins the exact serialized bytes of the messages, so a
+  ProtoMember tag change is a test failure instead of a silent desync.
+- `OpenHand.RenderingTests` (local only, outside the solution; needs
+  `VintageStoryPath`): everything that requires the game DLLs or real
+  internals. Fakes are DispatchProxy recordings for interfaces plus real
+  uninitialized `ClientPlayer`/`ServerPlayer` objects seeded with exactly the
+  fields the mod reads (decompile evidence lives in `TestFakes.cs`;
+  `IServerPlayer` cannot be DispatchProxy-ed — its hierarchy hides a member
+  from the proxy builder — so the server fake is a real `ServerPlayer`).
+  - `PatchTargetTests` is the game-update tripwire: it resolves every patch
+    `TargetMethod()` and the mod's private reflection lookups against the
+    installed game and applies the vanilla-target patches for real. Run it
+    alongside the decompile evidence whenever a game update lands.
+  - `CarryOnInteropTests` probes the known mod folders, extracts the newest
+    `CarryOn*.zip`/`CarryOnLib*.zip` into a scratch directory, and loads the
+    assemblies; it skips with a notice when CarryOn is absent.
+  - `ServerControllerTests` covers the offhand carry lock deterministically by
+    injecting the interop's reflection state with a test double, so it never
+    needs CarryOn installed.
+  - The hotkey persistence test deliberately never invokes
+    `ClientSettings.SetKeyMapping` — resolving the reflection target is the
+    assertion; invoking it would dirty the real `clientsettings.json` of the
+    machine running the tests.
+
 ## Validation expectations
 
 - State tests must pass before any merge.
+- Run `tests/OpenHand.RenderingTests` locally for any change touching
+  client/server internals, patch targets, or the runtime slot contract.
 - Changes to player-facing behavior must be validated in-game (single-player at
   minimum; both GUI scales if HUD rendering changed). Note what you checked in the
   PR's Testing section.
