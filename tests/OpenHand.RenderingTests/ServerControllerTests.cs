@@ -240,6 +240,35 @@ internal static class ServerControllerTests
                 "the client's optimistic write never satisfies the server's stale gate");
             TestFakes.Require(spServerView.Entity.WatchedAttributes.GetTreeAttribute("openhand")?.GetTreeAttribute("Selection") is not null,
                 "the request the client's optimism once ate is persisted");
+
+            // Hardening regression: a queued packet can still be dispatched
+            // while its sender's entity is being torn down (the same
+            // despawn/disconnect window OpenHandRuntime.Key guards against).
+            // Persistence must degrade gracefully — no crash, the runtime
+            // state and broadcast still apply — instead of throwing out of
+            // WatchedAttributes on a null Entity.
+            Vintagestory.Server.ServerPlayer entitylessPlayer =
+                TestFakes.MakeServerPlayer("uid-server-tests-no-entity");
+            TestFakes.ClearEntity(entitylessPlayer);
+            sent.Clear();
+            broadcasts.Clear();
+            selectionHandler.DynamicInvoke(entitylessPlayer,
+                new OpenHandSelectionRequest { Selected = true, RememberedHotbarSlot = 6, Revision = 1 });
+            TestFakes.Require(OpenHandRuntime.IsSelected(entitylessPlayer) &&
+                OpenHandRuntime.Get(entitylessPlayer).RememberedHotbarSlot == 6,
+                "a selection request still applies and broadcasts when the sender's entity is unavailable");
+            TestFakes.Require(broadcasts.Count == 1, "the unpersisted selection is still broadcast");
+
+            offhandHandler.DynamicInvoke(entitylessPlayer,
+                new OpenHandOffhandRequest { IsEmpty = true, Revision = 1 });
+            TestFakes.Require(OpenHandRuntime.IsOffhandEmpty(entitylessPlayer),
+                "an offhand request still applies when the sender's entity is unavailable");
+
+            // The join handler's LoadPersisted must also tolerate a missing
+            // entity instead of crashing the join.
+            sent.Clear();
+            joins.Single().DynamicInvoke(entitylessPlayer);
+            TestFakes.Require(sent.Count > 0, "join replay still runs for a player with no entity");
         }
         finally
         {
