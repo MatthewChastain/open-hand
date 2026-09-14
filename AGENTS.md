@@ -144,8 +144,10 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   the anchor correction keeps the last rendered hotbar geometry and applies
   it on frames where the hotbar dialog has not published (world-join
   ordering, HUD transitions), instead of snapping back to CarryOn's
-  overlapping defaults; the cache clears on world exit
-  (`CarryOnHudPatch.ResetLastGeometry`). Verified against decompiled CarryOn
+  overlapping defaults; the cache clears on world exit and whenever Open Hand
+  applies a changed hotbar appearance (`CarryOnHudPatch.ResetLastGeometry`),
+  so a hidden or repositioned indicator cannot leave CarryOn at stale
+  coordinates. Verified against decompiled CarryOn
   2.0.0-pre.8 (`HudCarriedRenderer.RenderOrder => 1.0`, registration in
   `HudCarried` at stage Ortho) and the 1.22.7 client event manager; re-verify
   on updates.

@@ -102,6 +102,14 @@ internal static class HudHotbarPatch
         failedBackgroundComposer = null;
         ResetCentering();
         centeringBlockedComposer = null;
+        // CarryOn's anchor correction falls back to the last published
+        // indicator geometry across transient hotbar render gaps. A config
+        // change is not transient: retaining that geometry would keep its
+        // indicators in their old position after hiding the indicator or
+        // changing the hotbar appearance. Let CarryOn use its native anchors
+        // until this configuration publishes fresh geometry on the next
+        // hotbar render.
+        CarryOnHudPatch.ResetLastGeometry();
         if (!config.ShouldShowMainHandIndicator() || anchorMode != IconAnchorMode.Auto)
         {
             DetachContinuousBackground();

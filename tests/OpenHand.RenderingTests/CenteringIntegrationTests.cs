@@ -151,6 +151,14 @@ internal static class CenteringIntegrationTests
             HudHotbarPatch.ApplyConfig(config, IconAnchorMode.Auto);
             Update();
             Check(HudHotbarPatch.CenteringOffsetX == 27, "explicit toggle permits retry");
+            // CarryOn's correction uses its last published indicator geometry
+            // only for a transient frame without a hotbar render. Applying a
+            // changed appearance must clear that fallback instead, so hidden
+            // indicators return CarryOn to its own anchors and visible
+            // indicators publish fresh coordinates on the next HUD render.
+            SetCarryOnGeometryValid(true);
+            HudHotbarPatch.ApplyConfig(config, IconAnchorMode.Auto);
+            Check(!CarryOnGeometryValid(), "applying hotbar appearance clears CarryOn fallback geometry");
 
             // A vanilla recompose (any inventory change, e.g. picking up a
             // carried item) rebuilds the composer's elements: fresh anchor
@@ -191,6 +199,10 @@ internal static class CenteringIntegrationTests
     }
 
     private static void Set(string name, object? value) => AccessTools.Field(typeof(HudHotbarPatch), name).SetValue(null, value);
+    private static void SetCarryOnGeometryValid(bool value) =>
+        AccessTools.Field(typeof(CarryOnHudPatch), "lastGeometryValid").SetValue(null, value);
+    private static bool CarryOnGeometryValid() =>
+        (bool)AccessTools.Field(typeof(CarryOnHudPatch), "lastGeometryValid").GetValue(null)!;
     private static GuiComposer Composer(ICoreClientAPI api, ElementBounds root) =>
         (GuiComposer)Activator.CreateInstance(typeof(GuiComposer), BindingFlags.Instance | BindingFlags.NonPublic,
             null, [api, root, "centering-test"], null)!;
