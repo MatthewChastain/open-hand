@@ -6,6 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <VintageStoryPath Condition="'$(VintageStoryPath)' == ''">$(VINTAGE_STORY)</VintageStoryPath>
+    <!-- Keeps the shipped PDB's file/line info (valuable for triaging user
+         crash reports) without embedding the builder's local disk path. -->
+    <PathMap>$(MSBuildProjectDirectory)=/openhand/</PathMap>
   </PropertyGroup>
   <Import Project="Local.props" Condition="Exists('Local.props')" />
   <Target Name="RequireVintageStoryPath" BeforeTargets="ResolveReferences" Condition="'$(VintageStoryPath)' == '' And '$(RequiresVintageStory)' != 'false'">
