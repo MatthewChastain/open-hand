@@ -25,14 +25,20 @@ internal static class TestFakes
         return proxy;
     }
 
-    internal static ClientPlayer MakeClientPlayer(string uid, ICoreClientAPI api, InventoryBase? hotbar = null)
+    // withEntity: false leaves worlddata.EntityPlayer null, reproducing the
+    // remote-player render-tick window (despawn/respawn/disconnect) where
+    // IPlayer.Entity is transiently unset (see OpenHandRuntimeTests).
+    internal static ClientPlayer MakeClientPlayer(string uid, ICoreClientAPI api, InventoryBase? hotbar = null, bool withEntity = true)
     {
         var player = (ClientPlayer)RuntimeHelpers.GetUninitializedObject(typeof(ClientPlayer));
         var data = (ClientWorldPlayerData)RuntimeHelpers.GetUninitializedObject(typeof(ClientWorldPlayerData));
         data.PlayerUID = uid;
-        var entity = (EntityPlayer)RuntimeHelpers.GetUninitializedObject(typeof(EntityPlayer));
-        entity.Api = api;
-        data.EntityPlayer = entity;
+        if (withEntity)
+        {
+            var entity = (EntityPlayer)RuntimeHelpers.GetUninitializedObject(typeof(EntityPlayer));
+            entity.Api = api;
+            data.EntityPlayer = entity;
+        }
         AccessTools.Field(typeof(ClientPlayer), "worlddata")!.SetValue(player, data);
         if (hotbar is not null)
         {

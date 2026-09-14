@@ -76,6 +76,18 @@ internal static class OpenHandRuntimeTests
             OpenHandRuntime.Clear(player);
             TestFakes.Require(!OpenHandRuntime.IsSelected(player) && !OpenHandRuntime.IsOffhandEmpty(player), "clear drops the player's state");
 
+            // B0YAR's crash (NullReferenceException in ActiveHandPatch.Postfix,
+            // reached from EntityPlayer.LightHsv during the render loop): the
+            // hand-substitution patches run for every nearby player's inventory
+            // manager on every tick, including a remote player whose Entity
+            // link is transiently null while despawning, respawning, or
+            // disconnecting. IsSelected/IsOffhandEmpty must tolerate that
+            // instead of dereferencing player.Entity unconditionally.
+            ClientPlayer entitylessPlayer = TestFakes.MakeClientPlayer(
+                "uid-runtime-tests-no-entity", api, withEntity: false);
+            TestFakes.Require(!OpenHandRuntime.IsSelected(entitylessPlayer), "a player with no entity is never selected");
+            TestFakes.Require(!OpenHandRuntime.IsOffhandEmpty(entitylessPlayer), "a player with no entity never reports an empty offhand");
+
             // Deliberate invariant: ClearAll drops the instance but leaves the
             // shared slot's Inventory attached, so the slot contract holds even
             // in the window before the next world's first EmptySlotFor call.

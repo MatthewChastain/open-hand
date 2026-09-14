@@ -29,9 +29,15 @@ public static class OpenHandRuntime
     // The per-side partition for a player. The entity's API is the real
     // discriminator (the server handler holds the server player, client input
     // holds the client player), and a null API only exists in tests — those
-    // resolve to the client partition.
+    // resolve to the client partition. Entity itself can be transiently null
+    // too: the hand-substitution patches fire for every nearby player's
+    // inventory manager on every render tick (EntityPlayer.LightHsv ->
+    // RightHandItemSlot -> ActiveHotbarSlot), including remote players whose
+    // Entity link is momentarily unset while despawning, respawning, or
+    // disconnecting — that null crashed the client render loop (NRE in
+    // ActiveHandPatch.Postfix via IsSelected) before this guard existed.
     private static (EnumAppSide Side, string Uid) Key(IPlayer player) =>
-        (player.Entity.Api?.Side ?? EnumAppSide.Client, player.PlayerUID);
+        (player.Entity?.Api?.Side ?? EnumAppSide.Client, player.PlayerUID);
 
     public static bool IsSelected(IPlayer? player) =>
         player is not null &&
