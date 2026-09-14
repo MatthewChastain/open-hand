@@ -36,15 +36,17 @@ internal sealed class OpenHandServerController : IDisposable
         // Server-side half of the substituted-slot sweep: CarryOn's server
         // place-down leaves the placed block's stack in the active hand slot
         // and its pick-up strands a LockedItemSlot wrapper in the mod-owned
-        // inventory (see OpenHandRuntime.SweepSubstitutedSlot).
+        // inventory (see OpenHandRuntime.Reclaim); any other foreign deposit
+        // — a mod handing an item out through the substituted slot — is
+        // delivered to that player's real inventory instead of being deleted.
+        OpenHandRuntime.CarryDetector = static player => CarryOnInterop.IsCarryingHands(player.Entity);
         sweepListenerId = sapi.Event.RegisterGameTickListener(
             OnGameTick, 0, 0);
     }
 
     private void OnGameTick(float deltaTime)
     {
-        OpenHandRuntime.SweepSubstitutedSlot();
-        OpenHandRuntime.SweepOffhandSlot();
+        OpenHandRuntime.SweepServerSubstitutedSlots();
     }
 
     private void OnSelectionRequest(IServerPlayer player, OpenHandSelectionRequest request)
