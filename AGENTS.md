@@ -79,9 +79,11 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   (`src/OpenHand/Patches/ActiveHandPatch.cs`), not by adding or editing slots.
   Item stacks must remain untouched in every code path.
 - **The substituted slot satisfies vanilla slot contracts.** While selected,
-  `ActiveHotbarSlot` returns a shared empty slot that is a real member
+  `ActiveHotbarSlot` returns the player's own empty slot, a real member
   (index 0) of a mod-owned one-slot `DummyInventory` (`Inventory` non-null;
-  `GetSlotId` returns 0). Third-party mods dereference `slot.Inventory` every
+  `GetSlotId` returns 0). Slots are per player (per API side): a foreign mod's
+  deposit must be delivered to its owner, and a shared slot could not tell
+  players apart on a server. Third-party mods dereference `slot.Inventory` every
   tick (Overhaul lib legacy compat crashed on a null inventory there), and
   CarryOn's `LockedItemSlot` constructor searches `slot.Inventory` by
   reference identity and throws when the slot is not a member — the 1.0.1
@@ -361,9 +363,11 @@ broadcast. See `OpenHandClientController.ApplyJoinReplay`.
   `client-main.log` + `server-main.log` alone: a client send with no server
   line means the packet died in dispatch; a server `applied` line with a join
   `restored persisted: none` means persistence itself broke.
-- CarryOn's placement transaction leaves two artifacts in the substituted
-  slot, both reclaimed by `OpenHandRuntime.SweepSubstitutedSlot()` every game
-  tick (client and server): the placed block's stack stays in the active hand
+- The deposit sweep (`OpenHandRuntime.SweepClientSubstitutedSlots` on the
+  client tick for the local player, `SweepServerSubstitutedSlots` on the
+  server tick for every player) runs every game tick and enforces the
+  substituted-slot invariants. CarryOn's placement transaction leaves two
+  artifacts it must reclaim: the placed block's stack stays in the active hand
   slot after a successful place-down (CarryOn clears it on failure but not on
   success, and vanilla `TryPlaceBlock` does not consume it), which otherwise
   duplicates the block on the next interaction; and pick-up replaces the
@@ -372,6 +376,26 @@ broadcast. See `OpenHandClientController.ApplyJoinReplay`.
   slot must always be handed out directly (see the slot-contract invariant):
   exposing the wrapper instead leaks stacks into engine item-move paths and
   duplicates items — tried and reverted.
+- **Foreign deposits are delivered, never deleted.** Other mods hand items out
+  through the substituted slot itself (Simple Immersive Beehive's frame take-out
+  moves the frame into `ActiveHotbarSlot` via `TryPutInto` — decompiled
+  OrekiWoofsBeehives 2.0.0 `TakeOutSlot`), and vanilla's own hotbar-sync packet
+  handler assigns `ActiveHotbarSlot.Itemstack` directly (decompiled 1.22.7
+  `GeneralPacketHandler.HandleSelectedHotbarSlot`). The old sweep deleted every
+  deposit within a tick — the item-vanish bug of issue #20 (a bucket taken from
+  Primitive Survival's well and beehive frames vanished entirely). The sweep now
+  decides by the carry state observed at the PREVIOUS sweep: with a hands carry
+  active then, the deposit is CarryOn's place-down artifact and is discarded
+  (delivering it would duplicate the placed block; the injected stack must also
+  stay visible to block behaviors for the tick it is injected in); otherwise the
+  deposit is a genuine hand-out and is delivered into the owner's real
+  inventory via `TryGiveItemstack` (dropped as an item entity if that fails on
+  the server; discarded on the client, where the inventory is only a view).
+  First deliveries and discards log once per session with the item and player
+  UID, so a "my item vanished" report is attributable from the logs. `Itemstack`
+  is not virtual (decompiled 1.22.7 API), so write-time interception is
+  impossible — the sweep-time redirect is the interception point; do not
+  replace it with per-write hooks.
 
 ## Packaging
 

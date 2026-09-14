@@ -53,6 +53,12 @@ internal sealed class OpenHandClientController : IDisposable
         Func<bool> isEmptyOffhandEnabled)
     {
         this.capi = capi;
+        // Both sides register the same static probe: the runtime lives in
+        // Common and cannot reference the client interop, and the deposit
+        // sweep needs the carry state to tell CarryOn's place-down artifacts
+        // (discard) from foreign deposits (deliver — see
+        // OpenHandRuntime.Reclaim).
+        OpenHandRuntime.CarryDetector = static player => CarryOnInterop.IsCarryingHands(player.Entity);
         this.isIndicatorVisible = isIndicatorVisible;
         this.isDoubleTapEnabled = isDoubleTapEnabled;
         this.isMainHandEnabled = isMainHandEnabled;
@@ -159,13 +165,14 @@ internal sealed class OpenHandClientController : IDisposable
     // Enforces the substituted-slot invariants every tick: CarryOn's
     // place-down leaves its temporary block stack in the active hand slot and
     // its pick-up strands a LockedItemSlot wrapper in the mod-owned inventory
-    // (see OpenHandRuntime.SweepSubstitutedSlot); with the empty offhand
-    // active, CarryOn's own left-hand lock lands in the substituted offhand
-    // slot the same way (see OpenHandRuntime.SweepOffhandSlot).
+    // (see OpenHandRuntime.Reclaim); with the empty offhand active, CarryOn's
+    // own left-hand lock lands in the substituted offhand slot the same way.
+    // Any other foreign deposit — a mod handing an item out through the
+    // substituted slot — is delivered to the player's real inventory instead
+    // of being deleted.
     private void OnGameTick(float deltaTime)
     {
-        OpenHandRuntime.SweepSubstitutedSlot();
-        OpenHandRuntime.SweepOffhandSlot();
+        OpenHandRuntime.SweepClientSubstitutedSlots(capi.World?.Player);
         SuppressOffhandHeldPose();
         ApplyJoinReplay();
         RequestInitialStateRefresh();
