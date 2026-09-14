@@ -5,6 +5,7 @@ using Vintagestory.API.Client;
 using Vintagestory.API.Datastructures;
 using Vintagestory.API.Common;
 using Vintagestory.Client.NoObf;
+using Vintagestory.Server;
 
 internal static class OpenHandRuntimeTests
 {
@@ -141,6 +142,38 @@ internal static class OpenHandRuntimeTests
                 "uid-runtime-tests-no-entity", api, withEntity: false);
             TestFakes.Require(!OpenHandRuntime.IsSelected(entitylessPlayer), "a player with no entity is never selected");
             TestFakes.Require(!OpenHandRuntime.IsOffhandEmpty(entitylessPlayer), "a player with no entity never reports an empty offhand");
+
+            // The same crash class reached one level deeper: SubstitutedHandSlots'
+            // constructor also dereferenced Entity unguarded (owner.Entity.Api),
+            // reachable from EmptySlotFor's lazy GroupFor(...) the first time a
+            // player with no entity is substituted.
+            ItemSlot entitylessSlot = OpenHandRuntime.EmptySlotFor(entitylessPlayer);
+            TestFakes.Require(entitylessSlot.Inventory is DummyInventory { Count: 1 },
+                "a player with no entity still gets a valid substituted slot");
+
+            // And a third spot: Deliver's server-side drop-as-item-entity
+            // fallback and LogOnce both dereferenced Entity unguarded too,
+            // reachable from the sweep loops (SweepServerSubstitutedSlots
+            // runs for every server-side group every tick) when a player's
+            // entity despawns/disconnects AFTER their group was already
+            // created with Side captured as Server — B0YAR's exact window,
+            // one layer further into the deposit-delivery pipeline.
+            // The default MakeServerPlayer proxy only stubs get_Side; the
+            // group's DummyInventory construction also needs ClassRegistry
+            // (InventoryBase.ctor -> api.ClassRegistry.CreateInvNetworkUtil).
+            ICoreAPI serverApi = TestFakes.Proxy<ICoreAPI>((method, _) => method.Name switch
+            {
+                "get_Side" => EnumAppSide.Server,
+                "get_ClassRegistry" => TestFakes.Proxy<IClassRegistryAPI>((m, a) => TestFakes.Default(m)),
+                _ => TestFakes.Default(method)
+            });
+            ServerPlayer despawningServerPlayer = TestFakes.MakeServerPlayer("uid-runtime-tests-server-despawn", serverApi);
+            ItemSlot serverSlot = OpenHandRuntime.EmptySlotFor(despawningServerPlayer);
+            TestFakes.ClearEntity(despawningServerPlayer);
+            serverSlot.Itemstack = MakeStack(1);
+            OpenHandRuntime.SweepServerSubstitutedSlots();
+            TestFakes.Require(serverSlot.Empty,
+                "the server sweep still reclaims a deposit after the owner's entity despawns, instead of crashing");
 
             // Deliberate invariant: ClearAll drops the groups but leaves each
             // slot's Inventory attached, so the slot contract holds even for a

@@ -231,9 +231,19 @@ public static class OpenHandRuntime
 
             if (group.Side == EnumAppSide.Server)
             {
-                group.Player.Entity.World.SpawnItemEntity(copy, group.Player.Entity.Pos.XYZ.Add(0.5, 0.5, 0.5), null);
-                LogOnce(group, $"{hand}:drop",
-                    $"Open Hand: player {group.Player.PlayerUID}'s inventory could not take {Describe(deposit)} from the substituted {hand} slot — dropped it as an item entity at their position instead.");
+                // Entity can be transiently null (despawning, disconnecting) —
+                // same window Key() guards against. Without a position to drop
+                // at, discard instead of crashing the sweep.
+                if (group.Player.Entity is { } entity)
+                {
+                    entity.World.SpawnItemEntity(copy, entity.Pos.XYZ.Add(0.5, 0.5, 0.5), null);
+                    LogOnce(group, $"{hand}:drop",
+                        $"Open Hand: player {group.Player.PlayerUID}'s inventory could not take {Describe(deposit)} from the substituted {hand} slot — dropped it as an item entity at their position instead.");
+                    return;
+                }
+
+                LogOnce(group, $"{hand}:noentitydiscard",
+                    $"Open Hand: discarded {Describe(deposit)} from player {group.Player.PlayerUID}'s substituted {hand} slot — their inventory could not take it and their entity was unavailable (despawning or disconnecting) to drop it at.");
                 return;
             }
 
@@ -263,7 +273,7 @@ public static class OpenHandRuntime
             }
         }
 
-        group.Player.Entity.Api?.Logger?.Notification(message);
+        group.Player.Entity?.Api?.Logger?.Notification(message);
     }
 
     // The substituted slot must satisfy vanilla's contract for
@@ -302,8 +312,12 @@ public static class OpenHandRuntime
         public SubstitutedHandSlots(IPlayer owner)
         {
             Player = owner;
-            Side = owner.Entity.Api?.Side ?? EnumAppSide.Client;
-            ICoreAPI? api = owner.Entity.Api;
+            // Entity can be transiently null here too (see Key): this group is
+            // built lazily on a selecting player's first substituted-getter
+            // hit, and their entity can despawn/disconnect between Set() and
+            // that first hit.
+            Side = owner.Entity?.Api?.Side ?? EnumAppSide.Client;
+            ICoreAPI? api = owner.Entity?.Api;
             MainSlot = new SubstitutedSlot(new DummyInventory(api));
             OffhandSlot = new SubstitutedSlot(new DummyInventory(api));
         }

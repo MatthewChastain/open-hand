@@ -78,6 +78,16 @@ internal static class TestFakes
         return player;
     }
 
+    // Simulates a player's entity despawning/disconnecting AFTER their
+    // substituted-slot group already exists — the flip B0YAR's crash
+    // exploited: the render/sweep loops keep calling into OpenHandRuntime for
+    // a player whose worlddata.EntityPlayer has since gone null.
+    internal static void ClearEntity(ClientPlayer player) =>
+        ((ClientWorldPlayerData)AccessTools.Field(typeof(ClientPlayer), "worlddata")!.GetValue(player)!).EntityPlayer = null!;
+
+    internal static void ClearEntity(ServerPlayer player) =>
+        ((ServerWorldPlayerData)AccessTools.Field(typeof(ServerPlayer), "worlddata")!.GetValue(player)!).EntityPlayer = null!;
+
     // Permissive DispatchProxy fallback: value-type returns get their default
     // so an unanticipated call cannot throw InvalidCastException; reference
     // returns are null and any dereference fails loudly at use.
