@@ -31,6 +31,19 @@ public sealed class OpenHandClientConfig
     public bool ShowIndicator { get; set; } = true;
 
     /// <summary>
+    /// Enables Open Hand's main-hand selection. On by default for existing
+    /// configs; disabling it prevents all new entry paths and drops an active
+    /// selection unless CarryOn is currently locking both hands.
+    /// </summary>
+    public bool MainHandEnabled { get; set; } = true;
+    /// <summary>
+    /// Whether the main-hand indicator should render now. The feature switch
+    /// suppresses the visual without overwriting its saved preference, so
+    /// re-enabling the feature restores an enabled indicator immediately.
+    /// </summary>
+    public bool ShouldShowMainHandIndicator() => MainHandEnabled && ShowIndicator;
+
+    /// <summary>
     /// Whether the client renders the empty-offhand feedback (the ghosted
     /// offhand cell and its full-slot highlight) while the substitution is
     /// active. Independent of <see cref="ShowIndicator"/>: hiding either

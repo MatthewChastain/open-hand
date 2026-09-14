@@ -102,7 +102,7 @@ internal static class HudHotbarPatch
         failedBackgroundComposer = null;
         ResetCentering();
         centeringBlockedComposer = null;
-        if (!config.ShowIndicator || anchorMode != IconAnchorMode.Auto)
+        if (!config.ShouldShowMainHandIndicator() || anchorMode != IconAnchorMode.Auto)
         {
             DetachContinuousBackground();
         }
@@ -144,7 +144,7 @@ internal static class HudHotbarPatch
 
     internal static string DescribeIconPlacement()
     {
-        return $"indicator={(config.ShowIndicator ? "on" : "off")} " +
+        return $"indicator={(config.ShouldShowMainHandIndicator() ? "on" : "off")} " +
             $"offhandIndicator={(config.ShowOffhandIndicator ? "on" : "off")} " +
             $"{anchorMode.ToString().ToLowerInvariant()} offset=({config.IconOffsetX},{config.IconOffsetY}) | " +
             $"last render: {lastPlacementDescription} | " +
@@ -236,7 +236,7 @@ internal static class HudHotbarPatch
         try
         {
             UpdateContinuousBackground(capi, __instance, x, y, size,
-                config.ShowIndicator && drawHotbarExtension);
+                config.ShouldShowMainHandIndicator() && drawHotbarExtension);
             UpdateCentering(capi, __instance, grid, y, size);
         }
         catch (Exception exception)
@@ -262,7 +262,7 @@ internal static class HudHotbarPatch
     private static void UpdateCentering(ICoreClientAPI api, object instance,
         GuiElementItemSlotGridBase grid, int rowY, int size)
     {
-        if (!config.CenterHotbar || !config.ShowIndicator || anchorMode != IconAnchorMode.Auto)
+        if (!config.CenterHotbar || !config.ShouldShowMainHandIndicator() || anchorMode != IconAnchorMode.Auto)
         {
             ResetCentering(!config.CenterHotbar ? "off" : "requires visible automatic indicator");
             return;
@@ -539,7 +539,7 @@ internal static class HudHotbarPatch
         indicatorRectValid = false;
         rowExtentValid = false;
         backgroundEdgesValid = false;
-        if (!config.ShowIndicator && !config.ShowOffhandIndicator)
+        if (!config.ShouldShowMainHandIndicator() && !config.ShowOffhandIndicator)
         {
             return;
         }
@@ -556,8 +556,10 @@ internal static class HudHotbarPatch
         if (player.WorldData.CurrentGameMode == EnumGameMode.Spectator) return;
 
         // The two visuals gate independently: the main-hand cell follows
-        // ShowIndicator, the offhand feedback follows ShowOffhandIndicator.
-        if (config.ShowIndicator)
+        // MainHandEnabled + ShowIndicator, while the offhand feedback follows
+        // ShowOffhandIndicator. Disabling the feature suppresses its visual
+        // without clearing the saved ShowIndicator preference.
+        if (config.ShouldShowMainHandIndicator())
         {
             ElementBounds slotZero = slotBounds[0];
 

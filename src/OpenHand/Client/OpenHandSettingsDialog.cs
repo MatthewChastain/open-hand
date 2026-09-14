@@ -40,8 +40,8 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
     private static readonly string[] BindableHotkeyNames =
     [
         "Select Open Hand",
-        "Toggle empty offhand",
-        "Open settings"
+        "Toggle Open Offhand",
+        "Open Hand Settings"
     ];
 
     private readonly Func<OpenHandClientConfig> config;
@@ -129,15 +129,12 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
         base.OnMouseUp(args);
     }
 
-    // Layout: 480px wide with generous vertical spacing and clear sectioning:
-    // - Behavior switches (pitch 36px, right-aligned)
-    // - Indicator position (280px dropdown prevents text truncation)
-    // - Pixel offset steppers
-    // - Help text block with dedicated vertical clearance
-    // - Footer buttons safely below the wrapped help text
+    // Layout: 500px wide with independently padded sections. Explicit section
+    // ranges and an intentionally blank footer gap keep every text and button
+    // bound disjoint at normal GUI scales.
     private void ComposeDialog()
     {
-        ElementBounds inner = ElementBounds.Fixed(EnumDialogArea.CenterMiddle, 0, 0, 480, 656);
+        ElementBounds inner = ElementBounds.Fixed(EnumDialogArea.CenterMiddle, 0, 0, 500, 670);
         ElementBounds outer = inner.FlatCopy().FixedGrow(0, 34);
         CairoFont label = CairoFont.WhiteDetailText();
         CairoFont small = CairoFont.WhiteSmallText();
@@ -146,61 +143,64 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
             .AddShadedDialogBG(ElementBounds.Fill, withTitleBar: false)
             .AddDialogTitleBar("Open Hand Settings", () => TryClose())
             .BeginChildElements(inner)
-                .AddStaticText("Main hand indicator", label, ElementBounds.Fixed(18, 28, 380, 22), "showIndicatorLabel")
-                .AddSwitch(OnShowIndicatorToggled, ElementBounds.Fixed(434, 25, 28, 28), "showIndicator")
-                .AddStaticText("Offhand indicator", label, ElementBounds.Fixed(18, 64, 380, 22), "showOffhandIndicatorLabel")
-                .AddSwitch(OnShowOffhandIndicatorToggled, ElementBounds.Fixed(434, 61, 28, 28), "showOffhandIndicator")
-                .AddStaticText("Center hotbar", label, ElementBounds.Fixed(18, 100, 380, 22), "centerLabel")
-                .AddSwitch(OnCenterToggled, ElementBounds.Fixed(434, 97, 28, 28), "centerHotbar")
-                .AddStaticText("Slot key double-tap", label, ElementBounds.Fixed(18, 136, 380, 22), "doubleTapLabel")
-                .AddSwitch(OnDoubleTapToggled, ElementBounds.Fixed(434, 133, 28, 28), "doubleTap")
-                .AddStaticText("Empty offhand", label, ElementBounds.Fixed(18, 172, 380, 22), "offhandLabel")
-                .AddSwitch(OnEmptyOffhandToggled, ElementBounds.Fixed(434, 169, 28, 28), "emptyOffhand")
-                .AddStaticText("Indicator position", label, ElementBounds.Fixed(18, 216, 160, 22), "anchorLabel")
+                .AddStaticText("MAIN HAND", small, ElementBounds.Fixed(24, 24, 452, 20), "mainHandHeading")
+                .AddStaticText("Enable Open Hand", label, ElementBounds.Fixed(24, 52, 380, 22), "mainHandEnabledLabel")
+                .AddSwitch(OnMainHandToggled, ElementBounds.Fixed(448, 49, 28, 28), "mainHandEnabled")
+                .AddStaticText("Show indicator", label, ElementBounds.Fixed(24, 84, 380, 22), "showIndicatorLabel")
+                .AddSwitch(OnShowIndicatorToggled, ElementBounds.Fixed(448, 81, 28, 28), "showIndicator")
+                .AddStaticText("Slot key double-tap", label, ElementBounds.Fixed(24, 116, 380, 22), "doubleTapLabel")
+                .AddSwitch(OnDoubleTapToggled, ElementBounds.Fixed(448, 113, 28, 28), "doubleTap")
+
+                .AddStaticText("OFFHAND", small, ElementBounds.Fixed(24, 162, 452, 20), "offhandHeading")
+                .AddStaticText("Enable Open Offhand", label, ElementBounds.Fixed(24, 190, 380, 22), "offhandEnabledLabel")
+                .AddSwitch(OnEmptyOffhandToggled, ElementBounds.Fixed(448, 187, 28, 28), "emptyOffhand")
+                .AddStaticText("Show offhand indicator", label, ElementBounds.Fixed(24, 222, 380, 22), "showOffhandIndicatorLabel")
+                .AddSwitch(OnShowOffhandIndicatorToggled, ElementBounds.Fixed(448, 219, 28, 28), "showOffhandIndicator")
+
+                .AddStaticText("HOTBAR APPEARANCE", small, ElementBounds.Fixed(24, 268, 452, 20), "appearanceHeading")
+                .AddStaticText("Center hotbar", label, ElementBounds.Fixed(24, 296, 380, 22), "centerLabel")
+                .AddSwitch(OnCenterToggled, ElementBounds.Fixed(448, 293, 28, 28), "centerHotbar")
+                .AddStaticText("Indicator position", label, ElementBounds.Fixed(24, 330, 150, 22), "anchorLabel")
                 .AddDropDown(AnchorValues, AnchorNames, AnchorIndex(),
-                    OnAnchorSelected, ElementBounds.Fixed(180, 213, 282, 26), "anchor")
-                .AddStaticText("Icon offset X", label, ElementBounds.Fixed(18, 254, 130, 22), "offsetXLabel")
+                    OnAnchorSelected, ElementBounds.Fixed(178, 327, 298, 26), "anchor")
+                .AddStaticText("Icon offset X", label, ElementBounds.Fixed(24, 366, 130, 22), "offsetXLabel")
                 .AddSmallButton("-", () => NudgeOffset(axisX: true, -1),
-                    ElementBounds.Fixed(160, 252, 24, 24), EnumButtonStyle.Small, "offsetXMinus")
+                    ElementBounds.Fixed(166, 364, 28, 26), EnumButtonStyle.Small, "offsetXMinus")
                 .AddDynamicText(OffsetText(c => c.IconOffsetX), small,
-                    ElementBounds.Fixed(192, 254, 55, 22), "offsetX")
+                    ElementBounds.Fixed(204, 366, 64, 22), "offsetX")
                 .AddSmallButton("+", () => NudgeOffset(axisX: true, 1),
-                    ElementBounds.Fixed(252, 252, 24, 24), EnumButtonStyle.Small, "offsetXPlus")
-                .AddStaticText("Icon offset Y", label, ElementBounds.Fixed(18, 288, 130, 22), "offsetYLabel")
+                    ElementBounds.Fixed(276, 364, 28, 26), EnumButtonStyle.Small, "offsetXPlus")
+                .AddStaticText("Icon offset Y", label, ElementBounds.Fixed(24, 400, 130, 22), "offsetYLabel")
                 .AddSmallButton("-", () => NudgeOffset(axisX: false, -1),
-                    ElementBounds.Fixed(160, 286, 24, 24), EnumButtonStyle.Small, "offsetYMinus")
+                    ElementBounds.Fixed(166, 398, 28, 26), EnumButtonStyle.Small, "offsetYMinus")
                 .AddDynamicText(OffsetText(c => c.IconOffsetY), small,
-                    ElementBounds.Fixed(192, 288, 55, 22), "offsetY")
+                    ElementBounds.Fixed(204, 400, 64, 22), "offsetY")
                 .AddSmallButton("+", () => NudgeOffset(axisX: false, 1),
-                    ElementBounds.Fixed(252, 286, 24, 24), EnumButtonStyle.Small, "offsetYPlus")
+                    ElementBounds.Fixed(276, 398, 28, 26), EnumButtonStyle.Small, "offsetYPlus")
+
+                .AddStaticText("KEYBINDS", small, ElementBounds.Fixed(24, 450, 452, 20), "bindsHeading")
                 .AddStaticText("Click a keybind, then press a key or mouse button. Escape cancels.",
-                    small, ElementBounds.Fixed(18, 328, 444, 36), "bindsLabel")
-                .AddStaticText(BindableHotkeyNames[0], label, ElementBounds.Fixed(18, 374, 240, 24), "bindSelectLabel")
+                    small, ElementBounds.Fixed(24, 476, 452, 44), "bindsLabel")
+                .AddStaticText(BindableHotkeyNames[0], label, ElementBounds.Fixed(24, 530, 238, 24), "bindSelectLabel")
                 .AddSmallButton(BindButtonText(BindableHotkeyCodes[0]), () => BeginKeyCapture(BindableHotkeyCodes[0]),
-                    ElementBounds.Fixed(270, 372, 192, 26), EnumButtonStyle.Small, "bindSelect")
-                .AddStaticText(BindableHotkeyNames[1], label, ElementBounds.Fixed(18, 406, 240, 24), "bindOffhandLabel")
+                    ElementBounds.Fixed(274, 528, 202, 26), EnumButtonStyle.Small, "bindSelect")
+                .AddStaticText(BindableHotkeyNames[1], label, ElementBounds.Fixed(24, 564, 238, 24), "bindOffhandLabel")
                 .AddSmallButton(BindButtonText(BindableHotkeyCodes[1]), () => BeginKeyCapture(BindableHotkeyCodes[1]),
-                    ElementBounds.Fixed(270, 404, 192, 26), EnumButtonStyle.Small, "bindOffhand")
-                .AddStaticText(BindableHotkeyNames[2], label, ElementBounds.Fixed(18, 438, 240, 24), "bindIndicatorLabel")
+                    ElementBounds.Fixed(274, 562, 202, 26), EnumButtonStyle.Small, "bindOffhand")
+                .AddStaticText(BindableHotkeyNames[2], label, ElementBounds.Fixed(24, 598, 238, 24), "bindIndicatorLabel")
                 .AddSmallButton(BindButtonText(BindableHotkeyCodes[2]), () => BeginKeyCapture(BindableHotkeyCodes[2]),
-                    ElementBounds.Fixed(270, 436, 192, 26), EnumButtonStyle.Small, "bindIndicator")
-                .AddStaticText(
-                    "Centering applies only to compatible layouts and falls back automatically. " +
-                    "The empty offhand switch enables the offhand toggle key; the selection and " +
-                    "toggle states persist across relogs and the substitution is dropped when " +
-                    "the switch is turned off. The indicator switches control the main-hand cell " +
-                    "and the offhand feedback independently.",
-                    small, ElementBounds.Fixed(18, 480, 444, 80), "help")
+                    ElementBounds.Fixed(274, 596, 202, 26), EnumButtonStyle.Small, "bindIndicator")
                 .AddSmallButton("Reset defaults", ResetDefaults,
-                    ElementBounds.Fixed(18, 580, 120, 28), EnumButtonStyle.Small, "reset")
+                    ElementBounds.Fixed(24, 632, 142, 30), EnumButtonStyle.Small, "reset")
                 .AddSmallButton("Done", () => TryClose(),
-                    ElementBounds.Fixed(372, 580, 90, 28), EnumButtonStyle.Small, "done")
+                    ElementBounds.Fixed(386, 632, 90, 30), EnumButtonStyle.Small, "done")
             .EndChildElements()
             // Without Compose the static texture is never built: the dialog
             // opens (mouse ungrabbed) but renders nothing.
             .Compose();
 
         Composers["settings"].GetSwitch("showIndicator").SetValue(config().ShowIndicator);
+        Composers["settings"].GetSwitch("mainHandEnabled").SetValue(config().MainHandEnabled);
         Composers["settings"].GetSwitch("showOffhandIndicator").SetValue(config().ShowOffhandIndicator);
         Composers["settings"].GetSwitch("centerHotbar").SetValue(config().CenterHotbar);
         Composers["settings"].GetSwitch("doubleTap").SetValue(config().DoubleTapHotbarKey);
@@ -308,6 +308,8 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
 
     private void OnShowIndicatorToggled(bool on) =>
         applyAndSave(c => c.ShowIndicator = on);
+    private void OnMainHandToggled(bool on) =>
+        applyAndSave(c => c.MainHandEnabled = on);
 
     private void OnShowOffhandIndicatorToggled(bool on) =>
         applyAndSave(c => c.ShowOffhandIndicator = on);
@@ -348,6 +350,7 @@ internal sealed class OpenHandSettingsDialog : GuiDialog
             c.IconOffsetX = 0;
             c.IconOffsetY = 0;
             c.ShowIndicator = true;
+            c.MainHandEnabled = true;
             c.ShowOffhandIndicator = true;
             c.CenterHotbar = true;
             c.DoubleTapHotbarKey = false;

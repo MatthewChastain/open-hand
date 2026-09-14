@@ -46,6 +46,7 @@ public sealed class OpenHandModSystem : ModSystem
             api, () => ToggleSettingsDialog(api),
             () => clientConfig.ShowIndicator,
             () => clientConfig.DoubleTapHotbarKey,
+            () => clientConfig.MainHandEnabled,
             () => clientConfig.EmptyOffhandEnabled);
         ReportClientConflicts();
 
@@ -167,11 +168,16 @@ public sealed class OpenHandModSystem : ModSystem
     // runtime, persist. UI surfaces decide their own feedback.
     internal void ApplyAndSaveClientConfig(Action<OpenHandClientConfig> mutate)
     {
+        bool wasMainHandEnabled = clientConfig.MainHandEnabled;
         bool wasEmptyOffhandEnabled = clientConfig.EmptyOffhandEnabled;
         mutate(clientConfig);
         HudHotbarPatch.ApplyConfig(
             clientConfig,
             OpenHandClientConfig.ParseIconAnchor(clientConfig.IconAnchor));
+        if (wasMainHandEnabled && !clientConfig.MainHandEnabled)
+        {
+            clientController?.DisableMainHand();
+        }
 
         // The feature switch gates the live substitution too: turning it off
         // while the offhand is substituted drops the substitution at once.
@@ -256,6 +262,16 @@ public sealed class OpenHandModSystem : ModSystem
             Mod.Logger.Error("Open Hand double-tap preference could not be saved: {0}", exception.Message);
             message += " The setting could not be saved.";
         }
+        return TextCommandResult.Success(message);
+    }
+
+    private TextCommandResult SetMainHand(bool enabled)
+    {
+        ApplyAndSaveClientConfig(c => c.MainHandEnabled = enabled);
+        string message = enabled
+            ? "Open Hand main-hand selection enabled."
+            : "Open Hand main-hand selection disabled.";
+        ClientApi?.ShowChatMessage(message);
         return TextCommandResult.Success(message);
     }
 
@@ -447,6 +463,21 @@ public sealed class OpenHandModSystem : ModSystem
             .BeginSubCommand("toggle")
             .WithDescription("Toggles the saved double-tap preference")
             .HandleWith(_ => SetDoubleTap(!clientConfig.DoubleTapHotbarKey))
+            .EndSubCommand()
+            .EndSubCommand()
+            .BeginSubCommand("mainhand")
+            .WithDescription("Controls the main-hand Open Hand feature")
+            .BeginSubCommand("on")
+            .WithDescription("Enables Open Hand selection")
+            .HandleWith(_ => SetMainHand(true))
+            .EndSubCommand()
+            .BeginSubCommand("off")
+            .WithDescription("Disables Open Hand selection and drops an active selection when safe")
+            .HandleWith(_ => SetMainHand(false))
+            .EndSubCommand()
+            .BeginSubCommand("toggle")
+            .WithDescription("Toggles the saved main-hand feature switch")
+            .HandleWith(_ => SetMainHand(!clientConfig.MainHandEnabled))
             .EndSubCommand()
             .EndSubCommand()
             .BeginSubCommand("offhand")

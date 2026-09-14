@@ -107,10 +107,11 @@ internal static class ClientHotkeyTests
         Action openSettings = () => opens++;
         Type controllerType = typeof(OpenHandModSystem).Assembly.GetType(
             "OpenHand.Client.OpenHandClientController", throwOnError: true)!;
+        bool mainHandEnabled = true;
         bool offhandEnabled = true;
         using IDisposable controller = (IDisposable)Activator.CreateInstance(
             controllerType, api, openSettings, (Func<bool>)(() => true), (Func<bool>)(() => false),
-            (Func<bool>)(() => offhandEnabled))!;
+            (Func<bool>)(() => mainHandEnabled), (Func<bool>)(() => offhandEnabled))!;
         HotKey indicator = hotkeyDict["openhand.indicator"];
         HotKey select = hotkeyDict["openhand.select"];
         KeyEvent ctrlTilde = new() { KeyCode = (int)GlKeys.Tilde, CtrlPressed = true };
@@ -136,6 +137,16 @@ internal static class ClientHotkeyTests
         TestFakes.Require(log.Count(message => message.Contains("openhand.select handler fired")) == 1,
             "the first select fire is logged exactly once");
 
+        // Main-hand feature switch gates every entry path at SelectOpenHand.
+        // A settled physical-slot state refuses a new selection without
+        // sending a request or mutating the optimistic state.
+        OpenHandRuntime.Set(player, selected: false, rememberedHotbarSlot: 0, revision: 2);
+        mainHandEnabled = false;
+        TestFakes.Require(!select.Handler(select.CurrentMapping), "main-hand feature switch declines entry");
+        TestFakes.Require(sent.Count == 1 && !OpenHandRuntime.IsSelected(player),
+            "a disabled main-hand feature sends no entry request");
+        mainHandEnabled = true;
+
         // While carrying, entry is declined (both directions), mutates nothing,
         // and the decline is logged once per carry episode — never silently.
         TestFakes.InjectCarry(carrying: true);
@@ -144,8 +155,8 @@ internal static class ClientHotkeyTests
             TestFakes.Require(!select.Handler(select.CurrentMapping), "entry while carrying declines");
             TestFakes.Require(!select.Handler(select.CurrentMapping), "a second carry-locked press still declines");
             TestFakes.Require(sent.Count == 1, "carry-locked presses send nothing");
-            TestFakes.Require(OpenHandRuntime.IsSelected(player) &&
-                OpenHandRuntime.Get(player).Revision == 1,
+            TestFakes.Require(!OpenHandRuntime.IsSelected(player) &&
+                OpenHandRuntime.Get(player).Revision == 2,
                 "carry-locked presses leave the selection state untouched");
             TestFakes.Require(log.Count(message => message.Contains("declined while carrying")) == 1,
                 "the carry decline is logged once per episode");
@@ -182,8 +193,8 @@ internal static class ClientHotkeyTests
             new OpenHandSelectionUpdate { PlayerUid = "uid-client-hotkey", Selected = true, RememberedHotbarSlot = 5, Revision = 3 });
         messageHandlers[nameof(OpenHandOffhandUpdate)].DynamicInvoke(
             new OpenHandOffhandUpdate { PlayerUid = "uid-client-hotkey", IsEmpty = true, Revision = 7 });
-        TestFakes.Require(OpenHandRuntime.IsSelected(player) &&
-            OpenHandRuntime.Get(player).Revision == 1 &&
+        TestFakes.Require(!OpenHandRuntime.IsSelected(player) &&
+            OpenHandRuntime.Get(player).Revision == 2 &&
             !OpenHandRuntime.IsOffhandEmpty(player) &&
             OpenHandRuntime.GetOffhandState(player).Revision == 6 && sent.Count == 3,
             "join-time updates arriving before the player exists change nothing yet");

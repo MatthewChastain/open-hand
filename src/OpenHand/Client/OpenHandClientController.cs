@@ -25,6 +25,7 @@ internal sealed class OpenHandClientController : IDisposable
     private readonly IClientNetworkChannel channel;
     private readonly Func<bool> isIndicatorVisible;
     private readonly Func<bool> isDoubleTapEnabled;
+    private readonly Func<bool> isMainHandEnabled;
     private readonly Func<bool> isEmptyOffhandEnabled;
     private long sweepListenerId;
     private int nextRevision;
@@ -48,11 +49,13 @@ internal sealed class OpenHandClientController : IDisposable
         Action openSettings,
         Func<bool> isIndicatorVisible,
         Func<bool> isDoubleTapEnabled,
+        Func<bool> isMainHandEnabled,
         Func<bool> isEmptyOffhandEnabled)
     {
         this.capi = capi;
         this.isIndicatorVisible = isIndicatorVisible;
         this.isDoubleTapEnabled = isDoubleTapEnabled;
+        this.isMainHandEnabled = isMainHandEnabled;
         this.isEmptyOffhandEnabled = isEmptyOffhandEnabled;
         channel = capi.Network.RegisterChannel(ChannelName)
             .RegisterMessageType<OpenHandSelectionRequest>()
@@ -237,6 +240,20 @@ internal sealed class OpenHandClientController : IDisposable
         }
     }
 
+    // The feature switch gates entry, not a CarryOn-protected exit: if a
+    // carried block locks both hands, changing the substitution would strand
+    // CarryOn's LockedItemSlot wrapper. The state drops as soon as it is safe,
+    // and all future entries are already disabled.
+    internal void DisableMainHand()
+    {
+        IClientPlayer? player = capi.World?.Player;
+        if (player is not null && OpenHandRuntime.IsSelected(player) &&
+            !CarryOnInterop.IsCarryingHands(player.Entity))
+        {
+            DeselectToSlot(player, OpenHandRuntime.Get(player).RememberedHotbarSlot);
+        }
+    }
+
     // Fires from api.eventapi.TriggerMouseDown before any client system or
     // dialog sees the click (verified against 1.22.7 ClientMain
     // .UpdateMouseButtonState), so handling here protects a cursor-held stack
@@ -393,6 +410,12 @@ internal sealed class OpenHandClientController : IDisposable
             // entering Open Hand.
             DeselectToSlot(player, current.RememberedHotbarSlot);
             return true;
+        }
+        if (!isMainHandEnabled())
+        {
+            LogOnce($"{SelectHotKeyCode}:feature",
+                $"Open Hand: {SelectHotKeyCode} declined — the main-hand feature switch is off; enable it in the Open Hand settings dialog.");
+            return false;
         }
 
         // Mirrors vanilla HudHotbar.OnKeySlot: cancel any held-item use first so

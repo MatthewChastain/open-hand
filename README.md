@@ -13,7 +13,8 @@ Built and tested against Vintage Story **1.22.7**, and the packaged mod declares
 ## Controls
 
 - Tilde (rebindable under Settings → Controls → Movement & character controls as **Select Open Hand**) selects Open Hand. Press it again to jump back to the slot you had selected before entering it.
-- Ctrl + tilde opens the Open Hand settings menu without changing your hand selection. Rebind it in the same controls category as **Open Open Hand settings**. The menu edits every client setting: the visual indicators, hotbar centering, slot key double-tap, the empty-offhand switch, the indicator's anchor position, and pixel offsets, plus a reset-to-defaults button. Changes apply and save immediately.
+- Ctrl + tilde opens the Open Hand settings menu without changing your hand selection. Rebind it in the same controls category as **Open Hand Settings**. Its clearly separated Main hand, Offhand, Hotbar appearance, and Keybind sections apply and save every change immediately.
+- **Enable Open Hand** controls all main-hand entry paths (hotkey, wheel, indicator click, and slot-key double-tap). It is on by default; switching it off hides the main-hand indicator and drops an active selection when doing so is safe, without changing the separate **Show indicator** preference.
 - With the **empty offhand** switch enabled, Shift + tilde (rebindable as **Toggle empty offhand**) substitutes an empty offhand: everything — engine and mods alike — reads the offhand as empty while the real item stays parked in its slot, untouched. Press it again to hand the offhand back. The state is server-validated and persists across relogs and server restarts; the switch itself lives in the settings menu and dropping it also drops any live substitution.
 - While carrying a block with CarryOn, the offhand toggle locks too: the carried block occupies the hands, so neither hand's substitution can flip until it is placed or dropped.
 - With the indicator hidden, scrolling skips Open Hand; use the **Select Open Hand** hotkey to activate it. You can still scroll out of Open Hand afterward. Showing the indicator restores wheel entry immediately.
@@ -33,6 +34,7 @@ While Open Hand is selected the engine resolves the main hand as empty. The ten 
 - `.openhand indicator on|off|toggle` — the saved indicator visibility (use a period, not a slash).
 - `.openhand center on|off|toggle` — the saved hotbar-centering preference.
 - `.openhand doubletap on|off|toggle` — the saved slot-key double-tap preference.
+- `.openhand mainhand on|off|toggle` — the saved main-hand feature switch; turning it off prevents entry and drops an active selection when safe.
 - `.openhand offhand on|off|toggle` — the saved empty-offhand switch; turning it off also drops any live substitution.
 
 All of these settings are also in the settings menu, which applies and saves every change immediately.
@@ -53,7 +55,8 @@ All client settings live in `openhand.json` under the game's `ModConfig` folder 
 
 - `IconAnchor` — where the indicator cell attaches: `auto` (a compatible external panel left of the hotbar), `offhandGap` (the classic but vanilla-reserved position), `left`, or `right` of the row.
 - `IconOffsetX` / `IconOffsetY` — final pixel nudges applied after the anchor resolves (settings menu steppers clamp to ±100).
-- `ShowIndicator` — whether the HUD panel, hand cell, and selection outline render. When disabled, entry is hotkey-only; wheel exit and server synchronization are unchanged.
+- `ShowIndicator` — whether the HUD panel, hand cell, and selection outline render while the main-hand feature is enabled. When disabled, entry is hotkey-only; wheel exit and server synchronization are unchanged.
+- `MainHandEnabled` — enables the main-hand Open Hand feature. On by default; when disabled, its indicator is suppressed, hotkey/wheel/indicator-click/double-tap entry are unavailable, and a live selection is dropped when safe. Disabling it does not change `ShowIndicator`, so an enabled indicator returns immediately when this feature is re-enabled.
 - `ShowOffhandIndicator` — whether the empty-offhand feedback (the ghosted offhand cell and its full-slot highlight) renders while the substitution is active. Independent of `ShowIndicator`; hiding either leaves the toggles themselves fully functional.
 - `EmptyOffhandEnabled` — enables the empty-offhand toggle hotkey (Shift + tilde by default). Off by default; disabling the switch also drops any live substitution.
 - `CenterHotbar` — centering described above, on by default; unsupported layouts remain uncentered.

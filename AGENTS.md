@@ -155,6 +155,16 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   `ActiveHotbarSlotNumber` to its current value fires no events. Any feature that
   changes selection and needs UI updates (e.g. highlight restore on wheel exit) must
   handle the no-change case explicitly — this caused a real bug before.
+- **The main-hand feature switch gates entry centrally.** `MainHandEnabled`
+  defaults to true so existing configs retain their behavior. Every entry
+  route (hotkey, wheel, indicator click, and digit double-tap) funnels through
+  `OpenHandClientController.SelectOpenHand`, which refuses new selection when
+  disabled; an already-selected state can still exit. Disabling the setting
+  drops an active selection through the server-validated request path unless
+  CarryOn currently locks both hands — never flip the substitution mid-carry.
+  It suppresses the main-hand HUD while off but must never clear the separate
+  `ShowIndicator` preference: re-enabling restores that visual immediately
+  when the preference remains enabled.
 - **HUD icon positioning is pixel-snapped** to vanilla integer slot coordinates
   (unscaled slot size 48, padding 3) and derived from HudHotbar internals at render
   time so it stays correct across GUI scales and resolutions. Icon textures are
