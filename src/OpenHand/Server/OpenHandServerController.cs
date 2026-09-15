@@ -70,6 +70,7 @@ internal sealed class OpenHandServerController : IDisposable
             $"applied a selection request at revision {request.Revision} (was {current.Revision}) and persisted it.");
         Send(player, state);
         channel.BroadcastPacket(ToUpdate(player.PlayerUID, state), player);
+        BroadcastHeldItems(player);
     }
 
     private void OnOffhandRequest(IServerPlayer player, OpenHandOffhandRequest request)
@@ -118,7 +119,30 @@ internal sealed class OpenHandServerController : IDisposable
             IsEmpty = state.IsEmpty,
             Revision = state.Revision
         }, player);
+        BroadcastHeldItems(player);
     }
+
+    // What makes the substitution visible to OTHER players. Their clients
+    // never hold this player's Open Hand state — the client update handlers
+    // deliberately apply only the local player's — so a remote observer
+    // renders whatever hand stacks the server last replicated to them
+    // (ServerMain.BroadcastHotbarSlot -> Packet_SelectedHotbarSlot ->
+    // GeneralPacketHandler.HandleSelectedHotbarSlot, decompiled 1.22.7).
+    // That replication reads ActiveHotbarSlot / Entity.LeftHandItemSlot —
+    // both substituted getters on this side — so it already sends the empty
+    // hand correctly; the problem was that nothing triggered it. Vanilla
+    // re-broadcasts only on a real slot change, an item flip, join, or a
+    // dirty slot that IS the active slot, and an Open Hand toggle is none of
+    // those: it deliberately leaves ActiveHotbarSlotNumber untouched, and
+    // while substituted the active slot is the mod-owned dummy, which lives
+    // in no tracked inventory and is never dirty. Other players therefore
+    // kept seeing the real item for the whole selection. Pushing the
+    // replication here is the fix, and it is the engine's own documented
+    // call for exactly this ("Resends the hotbar slot contents to all other
+    // clients to make sure they render the correct held item"); it skips the
+    // owner, whose own client is already correct through its own patches.
+    private static void BroadcastHeldItems(IServerPlayer player) =>
+        player.InventoryManager?.BroadcastHotbarSlot();
 
     private void SendOffhand(IServerPlayer player, OpenHandOffhandState state) =>
         channel.SendPacket(new OpenHandOffhandUpdate
