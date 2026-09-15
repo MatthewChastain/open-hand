@@ -84,6 +84,20 @@ internal static class ServerControllerTests
             "get_Logger" => logger,
             _ => TestFakes.Default(method)
         };
+        // The controller now pushes vanilla's own held-item replication
+        // (IPlayerInventoryManager.BroadcastHotbarSlot) after every applied
+        // toggle, which is what makes the substitution visible to OTHER
+        // players. The server-side override dereferences a ServerMain the
+        // fake player does not have, so intercept it with Harmony and record
+        // the invocations instead — the assertion is that it is called at
+        // all, and only for applied (non-stale, non-rejected) toggles.
+        Harmony heldItemProbe = new("openhand.tests.helditemsync");
+        heldItemProbe.Patch(
+            AccessTools.Method(
+                typeof(Vintagestory.Server.ServerPlayerInventoryManager),
+                nameof(Vintagestory.Server.ServerPlayerInventoryManager.BroadcastHotbarSlot)),
+            prefix: new HarmonyMethod(AccessTools.Method(typeof(HeldItemSyncProbe), nameof(HeldItemSyncProbe.Prefix))));
+
         OpenHandServerController controller = new(sapi);
         Delegate selectionHandler = handlers[nameof(OpenHandSelectionRequest)];
         Delegate offhandHandler = handlers[nameof(OpenHandOffhandRequest)];
@@ -104,9 +118,17 @@ internal static class ServerControllerTests
                 SelectionUpdateIs(broadcasts[0].Message, "uid-server-tests", selected: true, slot: 5, revision: 1),
                 "the settled selection is broadcast to the others, requester excepted");
 
+            // Without this, other players keep rendering the real item for the
+            // whole selection: an Open Hand toggle changes no hotbar slot
+            // number, so nothing in vanilla re-broadcasts the hand contents.
+            TestFakes.Require(HeldItemSyncProbe.Calls.Count == 1 &&
+                ReferenceEquals(HeldItemSyncProbe.Calls[0], player.InventoryManager),
+                "an applied selection pushes the held-item replication for the toggling player");
+
             // A stale or duplicate revision only re-sends the settled state.
             sent.Clear();
             broadcasts.Clear();
+            HeldItemSyncProbe.Calls.Clear();
             selectionHandler.DynamicInvoke(player,
                 new OpenHandSelectionRequest { Selected = false, RememberedHotbarSlot = 2, Revision = 1 });
             selectionHandler.DynamicInvoke(player,
@@ -116,10 +138,14 @@ internal static class ServerControllerTests
                 "stale selection revisions never regress state");
             TestFakes.Require(sent.Count == 2 && broadcasts.Count == 0,
                 "stale revisions only re-send the settled state");
+            TestFakes.Require(HeldItemSyncProbe.Calls.Count == 0,
+                "a stale selection revision does not push a held-item replication");
 
             // The offhand toggle rides the same revision scheme.
             offhandHandler.DynamicInvoke(player, new OpenHandOffhandRequest { IsEmpty = true, Revision = 1 });
             TestFakes.Require(OpenHandRuntime.IsOffhandEmpty(player), "a fresh offhand revision applies");
+            TestFakes.Require(HeldItemSyncProbe.Calls.Count == 1,
+                "an applied offhand toggle pushes the held-item replication too");
             TestFakes.Require(sent.Count == 3 && broadcasts.Count == 1 &&
                 OffhandUpdateIs(broadcasts[0].Message, "uid-server-tests", isEmpty: true, revision: 1),
                 "the settled offhand state is broadcast");
@@ -132,9 +158,12 @@ internal static class ServerControllerTests
             {
                 sent.Clear();
                 broadcasts.Clear();
+                HeldItemSyncProbe.Calls.Clear();
                 offhandHandler.DynamicInvoke(player, new OpenHandOffhandRequest { IsEmpty = true, Revision = 2 });
                 TestFakes.Require(OpenHandRuntime.IsOffhandEmpty(player),
                     "activation while carrying leaves the substitution off");
+                TestFakes.Require(HeldItemSyncProbe.Calls.Count == 0,
+                    "a carry-rejected activation pushes no held-item replication");
                 TestFakes.Require(sent.Count == 1 && broadcasts.Count == 0 &&
                     ReferenceEquals(sent[0].Targets[0], player) &&
                     OffhandUpdateIs(sent[0].Message, "uid-server-tests", isEmpty: true, revision: 1),
@@ -273,6 +302,8 @@ internal static class ServerControllerTests
         finally
         {
             controller.Dispose();
+            heldItemProbe.UnpatchAll("openhand.tests.helditemsync");
+            HeldItemSyncProbe.Calls.Clear();
         }
         TestFakes.Require(unregisteredTicks.Count == 1 && Equals(unregisteredTicks[0], 1L),
             "dispose unregisters the sweep tick listener");
@@ -290,4 +321,18 @@ internal static class ServerControllerTests
     private static bool OffhandUpdateIs(object message, string uid, bool isEmpty, int revision) =>
         message is OpenHandOffhandUpdate update && update.PlayerUid == uid &&
         update.IsEmpty == isEmpty && update.Revision == revision;
+
+    // Records IPlayerInventoryManager.BroadcastHotbarSlot invocations and
+    // skips the real one: the server-side override dereferences a ServerMain
+    // the fake player has no way to supply.
+    private static class HeldItemSyncProbe
+    {
+        internal static readonly List<object> Calls = [];
+
+        internal static bool Prefix(object __instance)
+        {
+            Calls.Add(__instance);
+            return false;
+        }
+    }
 }
