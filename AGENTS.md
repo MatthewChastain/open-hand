@@ -98,8 +98,8 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   `TargetMethod()` deliberately returns `null` (patch silently no-ops, logged)
   instead of throwing when a target is missing — the mod degrades gracefully
   rather than crashing. Keep that behavior.
-- **The empty-offhand toggle patches exactly two offhand read paths** (in
-  `src/OpenHand/Patches/OffhandSlotPatches.cs`): the
+- **The empty-offhand toggle patches two offhand read paths and guards one
+  write path** (in `src/OpenHand/Patches/OffhandSlotPatches.cs`): the
   `PlayerInventoryManager.OffhandHotbarSlot` getter (base class — neither
   `ClientPlayerInventoryManager` nor `ServerPlayerInventoryManager` overrides
   it, so one patch covers both sides) and the `EntityPlayer.LeftHandItemSlot`
@@ -111,6 +111,20 @@ These are load-bearing design decisions. Do not weaken them without discussion.
   main hand. While the toggle is active every mod reading the offhand sees it
   empty — that is the feature's purpose and is deliberate; the real item
   stays parked and untouched.
+  The getter substitution is not enough, because one vanilla path WRITES
+  through it: the `fliphandslots` hotkey (`HudHotbar.KeyFlipHandSlots`,
+  decompiled 1.22.7) flips the active slot with `LeftHandItemSlot`, moving
+  the active item into the substituted dummy. The sweep then deletes it
+  client-side while the flip packet — naming the dummy inventory ("dummy-N")
+  the server cannot resolve — is ignored, so the item survives server-side:
+  the client shows it gone, the server still holds it, and toggling off and
+  flipping again re-syncs it back (the "hammerspace / pocket dimension" Mod
+  DB report). `OffhandFlipPatch` prefixes that hotkey and declines the flip
+  for as long as the substitution is active — the offhand reads empty, and
+  an empty offhand is not a place to put an item — which also covers a
+  CarryOn hands-carry that began while the toggle was already on. Declines
+  log once per session; with the toggle off the vanilla flip passes through
+  untouched.
 - **Third-party compatibility patches are allowed, but only as a last
   resort.** Try the simpler tools first — public APIs, engine events,
   reflection reads, or the other mod's own configuration — and patch another
