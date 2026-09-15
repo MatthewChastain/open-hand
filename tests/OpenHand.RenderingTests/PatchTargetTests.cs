@@ -26,6 +26,9 @@ internal static class PatchTargetTests
         TestFakes.Require(Equals(HudHotbarPatch.TargetMethod(),
             AccessTools.Method(typeof(HudHotbar), "OnRenderGUI")),
             "the HUD patch targets HudHotbar.OnRenderGUI");
+        TestFakes.Require(Equals(OffhandFlipPatch.TargetMethod(),
+            AccessTools.Method(typeof(HudHotbar), "KeyFlipHandSlots")),
+            "the offhand flip guard targets HudHotbar.KeyFlipHandSlots");
 
         RequireResolved("ActiveHandPatch", "PlayerField");
         RequireResolved("OffhandInventoryPatch", "PlayerField");
@@ -52,15 +55,19 @@ internal static class PatchTargetTests
             harmony.CreateClassProcessor(typeof(ActiveHandPatch)).Patch();
             harmony.CreateClassProcessor(typeof(OffhandInventoryPatch)).Patch();
             harmony.CreateClassProcessor(typeof(OffhandEntityPatch)).Patch();
+            harmony.CreateClassProcessor(typeof(OffhandFlipPatch)).Patch();
             Patches mainHand = Harmony.GetPatchInfo(AccessTools.PropertyGetter(typeof(PlayerInventoryManager), "ActiveHotbarSlot"))!;
             Patches offhandGetter = Harmony.GetPatchInfo(AccessTools.PropertyGetter(typeof(PlayerInventoryManager), "OffhandHotbarSlot"))!;
             Patches leftHand = Harmony.GetPatchInfo(AccessTools.PropertyGetter(typeof(EntityPlayer), "LeftHandItemSlot"))!;
+            Patches flipGuard = Harmony.GetPatchInfo(AccessTools.Method(typeof(HudHotbar), "KeyFlipHandSlots"))!;
             TestFakes.Require(mainHand.Postfixes.Count(p => p.owner == "openhand.tests.patchtargets") == 1,
                 "the main-hand postfix applies");
             TestFakes.Require(offhandGetter.Postfixes.Count(p => p.owner == "openhand.tests.patchtargets") == 1,
                 "the offhand getter postfix applies");
             TestFakes.Require(leftHand.Postfixes.Count(p => p.owner == "openhand.tests.patchtargets") == 1,
                 "the offhand entity postfix applies");
+            TestFakes.Require(flipGuard.Prefixes.Count(p => p.owner == "openhand.tests.patchtargets") == 1,
+                "the offhand flip guard prefix applies");
         }
         finally
         {

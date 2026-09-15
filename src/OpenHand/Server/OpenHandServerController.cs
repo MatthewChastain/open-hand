@@ -36,15 +36,17 @@ internal sealed class OpenHandServerController : IDisposable
         // Server-side half of the substituted-slot sweep: CarryOn's server
         // place-down leaves the placed block's stack in the active hand slot
         // and its pick-up strands a LockedItemSlot wrapper in the mod-owned
-        // inventory (see OpenHandRuntime.SweepSubstitutedSlot).
+        // inventory (see OpenHandRuntime.Reclaim); any other foreign deposit
+        // — a mod handing an item out through the substituted slot — is
+        // delivered to that player's real inventory instead of being deleted.
+        OpenHandRuntime.CarryDetector = static player => CarryOnInterop.IsCarryingHands(player.Entity);
         sweepListenerId = sapi.Event.RegisterGameTickListener(
             OnGameTick, 0, 0);
     }
 
     private void OnGameTick(float deltaTime)
     {
-        OpenHandRuntime.SweepSubstitutedSlot();
-        OpenHandRuntime.SweepOffhandSlot();
+        OpenHandRuntime.SweepServerSubstitutedSlots();
     }
 
     private void OnSelectionRequest(IServerPlayer player, OpenHandSelectionRequest request)
@@ -68,6 +70,7 @@ internal sealed class OpenHandServerController : IDisposable
             $"applied a selection request at revision {request.Revision} (was {current.Revision}) and persisted it.");
         Send(player, state);
         channel.BroadcastPacket(ToUpdate(player.PlayerUID, state), player);
+        BroadcastHeldItems(player);
     }
 
     private void OnOffhandRequest(IServerPlayer player, OpenHandOffhandRequest request)
@@ -116,7 +119,30 @@ internal sealed class OpenHandServerController : IDisposable
             IsEmpty = state.IsEmpty,
             Revision = state.Revision
         }, player);
+        BroadcastHeldItems(player);
     }
+
+    // What makes the substitution visible to OTHER players. Their clients
+    // never hold this player's Open Hand state — the client update handlers
+    // deliberately apply only the local player's — so a remote observer
+    // renders whatever hand stacks the server last replicated to them
+    // (ServerMain.BroadcastHotbarSlot -> Packet_SelectedHotbarSlot ->
+    // GeneralPacketHandler.HandleSelectedHotbarSlot, decompiled 1.22.7).
+    // That replication reads ActiveHotbarSlot / Entity.LeftHandItemSlot —
+    // both substituted getters on this side — so it already sends the empty
+    // hand correctly; the problem was that nothing triggered it. Vanilla
+    // re-broadcasts only on a real slot change, an item flip, join, or a
+    // dirty slot that IS the active slot, and an Open Hand toggle is none of
+    // those: it deliberately leaves ActiveHotbarSlotNumber untouched, and
+    // while substituted the active slot is the mod-owned dummy, which lives
+    // in no tracked inventory and is never dirty. Other players therefore
+    // kept seeing the real item for the whole selection. Pushing the
+    // replication here is the fix, and it is the engine's own documented
+    // call for exactly this ("Resends the hotbar slot contents to all other
+    // clients to make sure they render the correct held item"); it skips the
+    // owner, whose own client is already correct through its own patches.
+    private static void BroadcastHeldItems(IServerPlayer player) =>
+        player.InventoryManager?.BroadcastHotbarSlot();
 
     private void SendOffhand(IServerPlayer player, OpenHandOffhandState state) =>
         channel.SendPacket(new OpenHandOffhandUpdate
@@ -129,45 +155,77 @@ internal sealed class OpenHandServerController : IDisposable
     // Write-through persistence: every authoritative mutation is saved into
     // the player's entity attributes (the same mechanism CarryOn uses for
     // carries), so both toggles survive relogs and server restarts and are
-    // restored at join.
-    private static ITreeAttribute PersistRoot(IServerPlayer player)
+    // restored at join. Player.Entity can be transiently null in the same
+    // despawn/disconnect window Key() guards against in OpenHandRuntime (a
+    // queued packet can still be dispatched while the sender's entity is
+    // being torn down) — these handlers run from network message callbacks,
+    // not a tick loop, so a miss here is rare, but it must degrade to
+    // "this mutation is not persisted" rather than crash the handler.
+    private static ITreeAttribute? PersistRoot(IServerPlayer player)
     {
-        ITreeAttribute? root = player.Entity.WatchedAttributes.GetTreeAttribute(PersistKey);
+        if (player.Entity is not { } entity)
+        {
+            return null;
+        }
+
+        ITreeAttribute? root = entity.WatchedAttributes.GetTreeAttribute(PersistKey);
         if (root is null)
         {
             root = new TreeAttribute();
-            player.Entity.WatchedAttributes[PersistKey] = root;
+            entity.WatchedAttributes[PersistKey] = root;
         }
 
         return root;
     }
 
-    private static void PersistSelection(IServerPlayer player, OpenHandSelectionState state)
+    private void PersistSelection(IServerPlayer player, OpenHandSelectionState state)
     {
-        ITreeAttribute root = PersistRoot(player);
+        if (PersistRoot(player) is not { } root)
+        {
+            LogPersistenceSkipped(player, "selection");
+            return;
+        }
+
         root[SelectionKey] = new TreeAttribute
         {
             ["Selected"] = new BoolAttribute(state.IsSelected),
             ["RememberedSlot"] = new IntAttribute(state.RememberedHotbarSlot),
             ["Revision"] = new IntAttribute(state.Revision)
         };
-        player.Entity.WatchedAttributes.MarkPathDirty(PersistKey);
+        player.Entity!.WatchedAttributes.MarkPathDirty(PersistKey);
     }
 
-    private static void PersistOffhand(IServerPlayer player, OpenHandOffhandState state)
+    private void PersistOffhand(IServerPlayer player, OpenHandOffhandState state)
     {
-        ITreeAttribute root = PersistRoot(player);
+        if (PersistRoot(player) is not { } root)
+        {
+            LogPersistenceSkipped(player, "empty-offhand");
+            return;
+        }
+
         root[OffhandKey] = new TreeAttribute
         {
             ["IsEmpty"] = new BoolAttribute(state.IsEmpty),
             ["Revision"] = new IntAttribute(state.Revision)
         };
-        player.Entity.WatchedAttributes.MarkPathDirty(PersistKey);
+        player.Entity!.WatchedAttributes.MarkPathDirty(PersistKey);
+    }
+
+    private void LogPersistenceSkipped(IServerPlayer player, string what)
+    {
+        sapi.Logger.Warning(
+            "Open Hand: could not persist the {0} change for {1} — their entity was unavailable (despawning or disconnecting). The change is still applied and broadcast for this session.",
+            what, player.PlayerName);
     }
 
     private static (OpenHandSelectionState? Selection, OpenHandOffhandState? Offhand) LoadPersisted(IServerPlayer player)
     {
-        ITreeAttribute? root = player.Entity.WatchedAttributes.GetTreeAttribute(PersistKey);
+        if (player.Entity is not { } entity)
+        {
+            return (null, null);
+        }
+
+        ITreeAttribute? root = entity.WatchedAttributes.GetTreeAttribute(PersistKey);
         if (root is null)
         {
             return (null, null);

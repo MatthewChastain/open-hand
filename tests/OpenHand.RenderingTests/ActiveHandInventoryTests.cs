@@ -20,7 +20,7 @@ internal static class ActiveHandInventoryTests
         {
             OpenHandRuntime.Set(player, selected: true, rememberedHotbarSlot: 5, revision: 1);
             ItemSlot result = Substitute(postfix, hotbar, player.InventoryManager!);
-            TestFakes.Require(ReferenceEquals(result, OpenHandRuntime.EmptySlot), "selected hand substitutes the shared slot");
+            TestFakes.Require(ReferenceEquals(result, OpenHandRuntime.EmptySlotFor(player)), "selected hand substitutes the player's slot");
 
             // The exact dereference that crashed Overhaul lib legacy compat:
             // Inventory must be non-null, and the slot must be a real member of

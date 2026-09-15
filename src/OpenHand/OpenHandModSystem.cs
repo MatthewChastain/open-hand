@@ -85,6 +85,7 @@ public sealed class OpenHandModSystem : ModSystem
         typeof(HudHotbarPatch),
         typeof(OffhandInventoryPatch),
         typeof(OffhandEntityPatch),
+        typeof(OffhandFlipPatch),
         typeof(CarryOnHudPatch),
         typeof(CarryOnRenderOrderPatch)
     ];
@@ -104,6 +105,7 @@ public sealed class OpenHandModSystem : ModSystem
                     nameof(HudHotbarPatch) => HudHotbarPatch.TargetMethod(),
                     nameof(OffhandInventoryPatch) => OffhandInventoryPatch.TargetMethod(),
                     nameof(OffhandEntityPatch) => OffhandEntityPatch.TargetMethod(),
+                    nameof(OffhandFlipPatch) => OffhandFlipPatch.TargetMethod(),
                     nameof(CarryOnHudPatch) => CarryOnHudPatch.TargetMethod(),
                     nameof(CarryOnRenderOrderPatch) => CarryOnRenderOrderPatch.TargetMethod(),
                     _ => null
@@ -506,6 +508,16 @@ public sealed class OpenHandModSystem : ModSystem
         clientController?.Dispose();
         serverController?.Dispose();
         harmony?.UnpatchAll(HarmonyId);
+
+        // These are static so ScanConflicts/status reporting can read them
+        // without an instance reference, but that means they otherwise
+        // outlive this instance: a later world's ApplyPatches would only add
+        // to whatever this session left behind, so a patch that applied here
+        // but fails in the next world would misreport as both applied and
+        // failed. Clear on dispose so each new session starts from a clean
+        // diagnostic slate.
+        AppliedPatches.Clear();
+        FailedPatches.Clear();
 
         ICoreClientAPI? clientApi = ClientApi;
         if (clientApi is not null)

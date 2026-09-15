@@ -25,14 +25,20 @@ internal static class TestFakes
         return proxy;
     }
 
-    internal static ClientPlayer MakeClientPlayer(string uid, ICoreClientAPI api, InventoryBase? hotbar = null)
+    // withEntity: false leaves worlddata.EntityPlayer null, reproducing the
+    // remote-player render-tick window (despawn/respawn/disconnect) where
+    // IPlayer.Entity is transiently unset (see OpenHandRuntimeTests).
+    internal static ClientPlayer MakeClientPlayer(string uid, ICoreClientAPI api, InventoryBase? hotbar = null, bool withEntity = true)
     {
         var player = (ClientPlayer)RuntimeHelpers.GetUninitializedObject(typeof(ClientPlayer));
         var data = (ClientWorldPlayerData)RuntimeHelpers.GetUninitializedObject(typeof(ClientWorldPlayerData));
         data.PlayerUID = uid;
-        var entity = (EntityPlayer)RuntimeHelpers.GetUninitializedObject(typeof(EntityPlayer));
-        entity.Api = api;
-        data.EntityPlayer = entity;
+        if (withEntity)
+        {
+            var entity = (EntityPlayer)RuntimeHelpers.GetUninitializedObject(typeof(EntityPlayer));
+            entity.Api = api;
+            data.EntityPlayer = entity;
+        }
         AccessTools.Field(typeof(ClientPlayer), "worlddata")!.SetValue(player, data);
         if (hotbar is not null)
         {
@@ -71,6 +77,16 @@ internal static class TestFakes
                 new Vintagestory.API.Datastructures.OrderedDictionary<string, InventoryBase>(), player, null));
         return player;
     }
+
+    // Simulates a player's entity despawning/disconnecting AFTER their
+    // substituted-slot group already exists — the flip B0YAR's crash
+    // exploited: the render/sweep loops keep calling into OpenHandRuntime for
+    // a player whose worlddata.EntityPlayer has since gone null.
+    internal static void ClearEntity(ClientPlayer player) =>
+        ((ClientWorldPlayerData)AccessTools.Field(typeof(ClientPlayer), "worlddata")!.GetValue(player)!).EntityPlayer = null!;
+
+    internal static void ClearEntity(ServerPlayer player) =>
+        ((ServerWorldPlayerData)AccessTools.Field(typeof(ServerPlayer), "worlddata")!.GetValue(player)!).EntityPlayer = null!;
 
     // Permissive DispatchProxy fallback: value-type returns get their default
     // so an unanticipated call cannot throw InvalidCastException; reference

@@ -32,9 +32,15 @@ public sealed class OpenHandSelectionUpdate
 }
 
 // The empty-offhand toggle rides the same channel and revision scheme as the
-// main-hand selection: the client requests, the server validates the revision
-// and broadcasts the settled state to everyone (other clients substitute the
-// sender's offhand in their own entity reads).
+// main-hand selection: the client requests and the server validates the
+// revision, then settles the sender's own client with the authoritative
+// state. Other clients do NOT substitute the sender's offhand from these
+// messages — the client update handlers deliberately apply only the local
+// player's state, so a remote observer holds no Open Hand state for anyone
+// else. What other players actually see comes from vanilla's own held-item
+// replication: the server reads the substituted getters and replicates the
+// resulting empty stacks, pushed by
+// OpenHandServerController.BroadcastHeldItems after every applied toggle.
 [ProtoContract]
 public sealed class OpenHandOffhandRequest
 {

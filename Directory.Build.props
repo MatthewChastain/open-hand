@@ -6,6 +6,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <VintageStoryPath Condition="'$(VintageStoryPath)' == ''">$(VINTAGE_STORY)</VintageStoryPath>
+    <!-- Keeps the shipped PDB's file/line info (valuable for triaging user
+         crash reports) without embedding the builder's local disk path. -->
+    <PathMap>$(MSBuildProjectDirectory)=/openhand/</PathMap>
+    <!-- The SDK's git auto-detection embeds a SourceLink blob (local path ->
+         GitHub raw-content URL) and a +<gitsha> InformationalVersion suffix.
+         Neither is read by this mod's own code or by crash-trace resolution
+         (PathMap above already covers that), and the SourceLink blob's map
+         key is the same local disk path PathMap exists to scrub. -->
+    <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
   </PropertyGroup>
   <Import Project="Local.props" Condition="Exists('Local.props')" />
   <Target Name="RequireVintageStoryPath" BeforeTargets="ResolveReferences" Condition="'$(VintageStoryPath)' == '' And '$(RequiresVintageStory)' != 'false'">
