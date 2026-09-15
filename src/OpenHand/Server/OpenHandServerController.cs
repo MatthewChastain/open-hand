@@ -131,45 +131,77 @@ internal sealed class OpenHandServerController : IDisposable
     // Write-through persistence: every authoritative mutation is saved into
     // the player's entity attributes (the same mechanism CarryOn uses for
     // carries), so both toggles survive relogs and server restarts and are
-    // restored at join.
-    private static ITreeAttribute PersistRoot(IServerPlayer player)
+    // restored at join. Player.Entity can be transiently null in the same
+    // despawn/disconnect window Key() guards against in OpenHandRuntime (a
+    // queued packet can still be dispatched while the sender's entity is
+    // being torn down) — these handlers run from network message callbacks,
+    // not a tick loop, so a miss here is rare, but it must degrade to
+    // "this mutation is not persisted" rather than crash the handler.
+    private static ITreeAttribute? PersistRoot(IServerPlayer player)
     {
-        ITreeAttribute? root = player.Entity.WatchedAttributes.GetTreeAttribute(PersistKey);
+        if (player.Entity is not { } entity)
+        {
+            return null;
+        }
+
+        ITreeAttribute? root = entity.WatchedAttributes.GetTreeAttribute(PersistKey);
         if (root is null)
         {
             root = new TreeAttribute();
-            player.Entity.WatchedAttributes[PersistKey] = root;
+            entity.WatchedAttributes[PersistKey] = root;
         }
 
         return root;
     }
 
-    private static void PersistSelection(IServerPlayer player, OpenHandSelectionState state)
+    private void PersistSelection(IServerPlayer player, OpenHandSelectionState state)
     {
-        ITreeAttribute root = PersistRoot(player);
+        if (PersistRoot(player) is not { } root)
+        {
+            LogPersistenceSkipped(player, "selection");
+            return;
+        }
+
         root[SelectionKey] = new TreeAttribute
         {
             ["Selected"] = new BoolAttribute(state.IsSelected),
             ["RememberedSlot"] = new IntAttribute(state.RememberedHotbarSlot),
             ["Revision"] = new IntAttribute(state.Revision)
         };
-        player.Entity.WatchedAttributes.MarkPathDirty(PersistKey);
+        player.Entity!.WatchedAttributes.MarkPathDirty(PersistKey);
     }
 
-    private static void PersistOffhand(IServerPlayer player, OpenHandOffhandState state)
+    private void PersistOffhand(IServerPlayer player, OpenHandOffhandState state)
     {
-        ITreeAttribute root = PersistRoot(player);
+        if (PersistRoot(player) is not { } root)
+        {
+            LogPersistenceSkipped(player, "empty-offhand");
+            return;
+        }
+
         root[OffhandKey] = new TreeAttribute
         {
             ["IsEmpty"] = new BoolAttribute(state.IsEmpty),
             ["Revision"] = new IntAttribute(state.Revision)
         };
-        player.Entity.WatchedAttributes.MarkPathDirty(PersistKey);
+        player.Entity!.WatchedAttributes.MarkPathDirty(PersistKey);
+    }
+
+    private void LogPersistenceSkipped(IServerPlayer player, string what)
+    {
+        sapi.Logger.Warning(
+            "Open Hand: could not persist the {0} change for {1} — their entity was unavailable (despawning or disconnecting). The change is still applied and broadcast for this session.",
+            what, player.PlayerName);
     }
 
     private static (OpenHandSelectionState? Selection, OpenHandOffhandState? Offhand) LoadPersisted(IServerPlayer player)
     {
-        ITreeAttribute? root = player.Entity.WatchedAttributes.GetTreeAttribute(PersistKey);
+        if (player.Entity is not { } entity)
+        {
+            return (null, null);
+        }
+
+        ITreeAttribute? root = entity.WatchedAttributes.GetTreeAttribute(PersistKey);
         if (root is null)
         {
             return (null, null);
