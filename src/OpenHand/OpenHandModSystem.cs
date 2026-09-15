@@ -85,6 +85,7 @@ public sealed class OpenHandModSystem : ModSystem
         typeof(HudHotbarPatch),
         typeof(OffhandInventoryPatch),
         typeof(OffhandEntityPatch),
+        typeof(OffhandFlipPatch),
         typeof(CarryOnHudPatch),
         typeof(CarryOnRenderOrderPatch)
     ];
@@ -104,6 +105,7 @@ public sealed class OpenHandModSystem : ModSystem
                     nameof(HudHotbarPatch) => HudHotbarPatch.TargetMethod(),
                     nameof(OffhandInventoryPatch) => OffhandInventoryPatch.TargetMethod(),
                     nameof(OffhandEntityPatch) => OffhandEntityPatch.TargetMethod(),
+                    nameof(OffhandFlipPatch) => OffhandFlipPatch.TargetMethod(),
                     nameof(CarryOnHudPatch) => CarryOnHudPatch.TargetMethod(),
                     nameof(CarryOnRenderOrderPatch) => CarryOnRenderOrderPatch.TargetMethod(),
                     _ => null
